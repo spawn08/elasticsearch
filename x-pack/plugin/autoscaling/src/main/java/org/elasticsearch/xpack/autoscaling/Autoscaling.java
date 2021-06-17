@@ -17,7 +17,6 @@ import org.elasticsearch.cluster.metadata.Metadata;
 import org.elasticsearch.cluster.node.DiscoveryNodes;
 import org.elasticsearch.cluster.routing.allocation.decider.AllocationDeciders;
 import org.elasticsearch.cluster.service.ClusterService;
-import org.elasticsearch.common.ParseField;
 import org.elasticsearch.common.io.stream.NamedWriteableRegistry;
 import org.elasticsearch.common.settings.ClusterSettings;
 import org.elasticsearch.common.settings.IndexScopedSettings;
@@ -25,6 +24,7 @@ import org.elasticsearch.common.settings.Setting;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.settings.SettingsFilter;
 import org.elasticsearch.common.xcontent.NamedXContentRegistry;
+import org.elasticsearch.common.xcontent.ParseField;
 import org.elasticsearch.env.Environment;
 import org.elasticsearch.env.NodeEnvironment;
 import org.elasticsearch.plugins.ActionPlugin;
@@ -54,6 +54,7 @@ import org.elasticsearch.xpack.autoscaling.rest.RestGetAutoscalingCapacityHandle
 import org.elasticsearch.xpack.autoscaling.rest.RestGetAutoscalingPolicyHandler;
 import org.elasticsearch.xpack.autoscaling.rest.RestPutAutoscalingPolicyHandler;
 import org.elasticsearch.xpack.autoscaling.shards.FrozenShardsDeciderService;
+import org.elasticsearch.xpack.autoscaling.storage.FrozenStorageDeciderService;
 import org.elasticsearch.xpack.autoscaling.storage.ProactiveStorageDeciderService;
 import org.elasticsearch.xpack.autoscaling.storage.ReactiveStorageDeciderService;
 
@@ -170,6 +171,11 @@ public class Autoscaling extends Plugin implements ActionPlugin, ExtensiblePlugi
                 AutoscalingDeciderResult.Reason.class,
                 FrozenShardsDeciderService.NAME,
                 FrozenShardsDeciderService.FrozenShardsReason::new
+            ),
+            new NamedWriteableRegistry.Entry(
+                AutoscalingDeciderResult.Reason.class,
+                FrozenStorageDeciderService.NAME,
+                FrozenStorageDeciderService.FrozenReason::new
             )
         );
     }
@@ -201,7 +207,8 @@ public class Autoscaling extends Plugin implements ActionPlugin, ExtensiblePlugi
                 clusterService.get().getClusterSettings(),
                 allocationDeciders.get()
             ),
-            new FrozenShardsDeciderService()
+            new FrozenShardsDeciderService(),
+            new FrozenStorageDeciderService()
         );
     }
 

@@ -14,8 +14,12 @@ import org.elasticsearch.action.support.master.MasterNodeRequest;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
+import org.elasticsearch.tasks.CancellableTask;
+import org.elasticsearch.tasks.Task;
+import org.elasticsearch.tasks.TaskId;
 
 import java.io.IOException;
+import java.util.Map;
 
 import static org.elasticsearch.action.ValidateActions.addValidationError;
 
@@ -37,8 +41,7 @@ public class GetSnapshotsRequest extends MasterNodeRequest<GetSnapshotsRequest> 
 
     private boolean verbose = DEFAULT_VERBOSE_MODE;
 
-    public GetSnapshotsRequest() {
-    }
+    public GetSnapshotsRequest() {}
 
     /**
      * Constructs a new get snapshots request with given repository names and list of snapshots
@@ -65,7 +68,7 @@ public class GetSnapshotsRequest extends MasterNodeRequest<GetSnapshotsRequest> 
         if (in.getVersion().onOrAfter(MULTIPLE_REPOSITORIES_SUPPORT_ADDED)) {
             repositories = in.readStringArray();
         } else {
-            repositories = new String[]{in.readString()};
+            repositories = new String[] { in.readString() };
         }
         snapshots = in.readStringArray();
         ignoreUnavailable = in.readBoolean();
@@ -79,8 +82,11 @@ public class GetSnapshotsRequest extends MasterNodeRequest<GetSnapshotsRequest> 
             out.writeStringArray(repositories);
         } else {
             if (repositories.length != 1) {
-                throw new IllegalArgumentException("Requesting snapshots from multiple repositories is not supported in versions prior " +
-                        "to " + MULTIPLE_REPOSITORIES_SUPPORT_ADDED.toString());
+                throw new IllegalArgumentException(
+                    "Requesting snapshots from multiple repositories is not supported in versions prior "
+                        + "to "
+                        + MULTIPLE_REPOSITORIES_SUPPORT_ADDED.toString()
+                );
             }
             out.writeString(repositories[0]);
         }
@@ -173,5 +179,10 @@ public class GetSnapshotsRequest extends MasterNodeRequest<GetSnapshotsRequest> 
      */
     public boolean verbose() {
         return verbose;
+    }
+
+    @Override
+    public Task createTask(long id, String type, String action, TaskId parentTaskId, Map<String, String> headers) {
+        return new CancellableTask(id, type, action, getDescription(), parentTaskId, headers);
     }
 }
