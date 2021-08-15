@@ -722,8 +722,8 @@ document metadata fields `on_failure_message`, `on_failure_processor_type`,
 `on_failure_processor_tag`, and `on_failure_pipeline`. These fields are
 accessible only from within an `on_failure` block.
 
-The following example uses the error metadata fields to provide additional
-information on the document about the failure.
+The following example uses the metadata fields to include information about
+pipeline failures in documents.
 
 [source,console]
 ----
@@ -770,10 +770,10 @@ PUT _ingest/pipeline/my-pipeline
 }
 ----
 
-If the static `script.painless.regex.enabled` cluster setting is enabled, you
-can use regular expressions in your `if` condition scripts. For supported
-syntax, see the {painless}/painless-regexes.html[Painless regexes]
-documentation.
+If the <<script-painless-regex-enabled,`script.painless.regex.enabled`>> cluster
+setting is enabled, you can use regular expressions in your `if` condition
+scripts. For supported syntax, see {painless}/painless-regexes.html[Painless
+regular expressions].
 
 TIP: If possible, avoid using regular expressions. Expensive regular expressions
 can slow indexing speeds.
