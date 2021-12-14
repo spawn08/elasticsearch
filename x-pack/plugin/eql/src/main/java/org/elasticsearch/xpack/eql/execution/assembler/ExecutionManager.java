@@ -51,13 +51,15 @@ public class ExecutionManager {
         this.cfg = eqlSession.configuration();
     }
 
-    public Executable assemble(List<List<Attribute>> listOfKeys,
-                               List<PhysicalPlan> plans,
-                               Attribute timestamp,
-                               Attribute tiebreaker,
-                               OrderDirection direction,
-                               TimeValue maxSpan,
-                               Limit limit) {
+    public Executable assemble(
+        List<List<Attribute>> listOfKeys,
+        List<PhysicalPlan> plans,
+        Attribute timestamp,
+        Attribute tiebreaker,
+        OrderDirection direction,
+        TimeValue maxSpan,
+        Limit limit
+    ) {
         FieldExtractorRegistry extractorRegistry = new FieldExtractorRegistry();
 
         boolean descending = direction == OrderDirection.DESC;
@@ -86,8 +88,7 @@ public class ExecutionManager {
             for (int j = 0; j < keyExtractors.size(); j++) {
                 HitExtractor extractor = keyExtractors.get(j);
 
-                if (extractor instanceof AbstractFieldHitExtractor) {
-                    AbstractFieldHitExtractor hitExtractor = (AbstractFieldHitExtractor) extractor;
+                if (extractor instanceof AbstractFieldHitExtractor hitExtractor) {
                     // remember if the field is optional
                     boolean isOptional = keys.get(j) instanceof OptionalResolvedAttribute;
                     // no nested fields
@@ -101,7 +102,7 @@ public class ExecutionManager {
                         keyFields = emptyList();
                         break;
                     }
-                // optional field
+                    // optional field
                 } else if (extractor instanceof ComputingExtractor) {
                     keyFields.add(((ComputingExtractor) extractor).hitName());
                 }
@@ -113,8 +114,15 @@ public class ExecutionManager {
                 SearchSourceBuilder source = ((EsQueryExec) query).source(session, false);
                 QueryRequest original = () -> source;
                 BoxedQueryRequest boxedRequest = new BoxedQueryRequest(original, timestampName, keyFields, optionalKeys);
-                Criterion<BoxedQueryRequest> criterion =
-                        new Criterion<>(i, boxedRequest, keyExtractors, tsExtractor, tbExtractor, itbExtractor, i == 0 && descending);
+                Criterion<BoxedQueryRequest> criterion = new Criterion<>(
+                    i,
+                    boxedRequest,
+                    keyExtractors,
+                    tsExtractor,
+                    tbExtractor,
+                    itbExtractor,
+                    i == 0 && descending
+                );
                 criteria.add(criterion);
             } else {
                 // until
@@ -129,17 +137,18 @@ public class ExecutionManager {
         int completionStage = criteria.size() - 1;
         SequenceMatcher matcher = new SequenceMatcher(completionStage, descending, maxSpan, limit, session.circuitBreaker());
 
-        TumblingWindow w = new TumblingWindow(new PITAwareQueryClient(session),
-                criteria.subList(0, completionStage),
-                criteria.get(completionStage),
-                matcher);
+        TumblingWindow w = new TumblingWindow(
+            new PITAwareQueryClient(session),
+            criteria.subList(0, completionStage),
+            criteria.get(completionStage),
+            matcher
+        );
 
         return w;
     }
 
     private HitExtractor timestampExtractor(HitExtractor hitExtractor) {
-        if (hitExtractor instanceof FieldHitExtractor) {
-            FieldHitExtractor fe = (FieldHitExtractor) hitExtractor;
+        if (hitExtractor instanceof FieldHitExtractor fe) {
             return (fe instanceof TimestampFieldHitExtractor) ? hitExtractor : new TimestampFieldHitExtractor(fe);
         }
         throw new EqlIllegalArgumentException("Unexpected extractor [{}]", hitExtractor);

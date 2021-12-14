@@ -8,12 +8,12 @@
 package org.elasticsearch.xpack.ml.inference.nlp;
 
 import org.elasticsearch.common.logging.LoggerMessageFormat;
-import org.elasticsearch.xpack.core.ml.inference.results.ClassificationInferenceResults;
 import org.elasticsearch.xpack.core.ml.inference.results.InferenceResults;
+import org.elasticsearch.xpack.core.ml.inference.results.NlpClassificationInferenceResults;
 import org.elasticsearch.xpack.core.ml.inference.results.TopClassEntry;
 import org.elasticsearch.xpack.core.ml.inference.results.WarningInferenceResults;
 import org.elasticsearch.xpack.core.ml.inference.trainedmodel.NlpConfig;
-import org.elasticsearch.xpack.core.ml.inference.trainedmodel.PredictionFieldType;
+import org.elasticsearch.xpack.core.ml.inference.trainedmodel.Tokenization;
 import org.elasticsearch.xpack.core.ml.inference.trainedmodel.ZeroShotClassificationConfig;
 import org.elasticsearch.xpack.core.ml.utils.ExceptionsHelper;
 import org.elasticsearch.xpack.ml.inference.deployment.PyTorchResult;
@@ -31,7 +31,6 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import static org.elasticsearch.xpack.core.ml.inference.trainedmodel.InferenceConfig.DEFAULT_RESULTS_FIELD;
-import static org.elasticsearch.xpack.core.ml.inference.trainedmodel.InferenceConfig.DEFAULT_TOP_CLASSES_RESULTS_FIELD;
 
 public class ZeroShotClassificationProcessor implements NlpTask.Processor {
 
@@ -69,35 +68,35 @@ public class ZeroShotClassificationProcessor implements NlpTask.Processor {
 
     @Override
     public NlpTask.RequestBuilder getRequestBuilder(NlpConfig nlpConfig) {
-        final String[] labels;
+        final String[] labelsValue;
         if (nlpConfig instanceof ZeroShotClassificationConfig) {
             ZeroShotClassificationConfig zeroShotConfig = (ZeroShotClassificationConfig) nlpConfig;
-            labels = zeroShotConfig.getLabels().toArray(new String[0]);
+            labelsValue = zeroShotConfig.getLabels().toArray(new String[0]);
         } else {
-            labels = this.labels;
+            labelsValue = this.labels;
         }
-        if (labels == null || labels.length == 0) {
+        if (labelsValue == null || labelsValue.length == 0) {
             throw ExceptionsHelper.badRequestException("zero_shot_classification requires non-empty [labels]");
         }
-        return new RequestBuilder(tokenizer, labels, hypothesisTemplate);
+        return new RequestBuilder(tokenizer, labelsValue, hypothesisTemplate);
     }
 
     @Override
     public NlpTask.ResultProcessor getResultProcessor(NlpConfig nlpConfig) {
-        final String[] labels;
-        final boolean isMultiLabel;
-        final String resultsField;
+        final String[] labelsValue;
+        final boolean isMultiLabelValue;
+        final String resultsFieldValue;
         if (nlpConfig instanceof ZeroShotClassificationConfig) {
             ZeroShotClassificationConfig zeroShotConfig = (ZeroShotClassificationConfig) nlpConfig;
-            labels = zeroShotConfig.getLabels().toArray(new String[0]);
-            isMultiLabel = zeroShotConfig.isMultiLabel();
-            resultsField = zeroShotConfig.getResultsField();
+            labelsValue = zeroShotConfig.getLabels().toArray(new String[0]);
+            isMultiLabelValue = zeroShotConfig.isMultiLabel();
+            resultsFieldValue = zeroShotConfig.getResultsField();
         } else {
-            labels = this.labels;
-            isMultiLabel = this.isMultiLabel;
-            resultsField = this.resultsField;
+            labelsValue = this.labels;
+            isMultiLabelValue = this.isMultiLabel;
+            resultsFieldValue = this.resultsField;
         }
-        return new ResultProcessor(entailmentPos, contraPos, labels, isMultiLabel, resultsField);
+        return new ResultProcessor(entailmentPos, contraPos, labelsValue, isMultiLabelValue, resultsFieldValue);
     }
 
     static class RequestBuilder implements NlpTask.RequestBuilder {
@@ -113,13 +112,13 @@ public class ZeroShotClassificationProcessor implements NlpTask.Processor {
         }
 
         @Override
-        public NlpTask.Request buildRequest(List<String> inputs, String requestId) throws IOException {
+        public NlpTask.Request buildRequest(List<String> inputs, String requestId, Tokenization.Truncate truncate) throws IOException {
             if (inputs.size() > 1) {
                 throw new IllegalArgumentException("Unable to do zero-shot classification on more than one text input at a time");
             }
             List<TokenizationResult.Tokenization> tokenizations = new ArrayList<>(labels.length);
             for (String label : labels) {
-                tokenizations.add(tokenizer.tokenize(inputs.get(0), LoggerMessageFormat.format(null, hypothesisTemplate, label)));
+                tokenizations.add(tokenizer.tokenize(inputs.get(0), LoggerMessageFormat.format(null, hypothesisTemplate, label), truncate));
             }
             TokenizationResult result = tokenizer.buildTokenizationResult(tokenizations);
             return buildRequest(result, requestId);
@@ -174,7 +173,7 @@ public class ZeroShotClassificationProcessor implements NlpTask.Processor {
                     }
                     // assume entailment is `0`, softmax between entailment and contradiction
                     normalizedScores[v++] = NlpHelpers.convertToProbabilitiesBySoftMax(
-                        new double[]{vals[entailmentPos], vals[contraPos]}
+                        new double[] { vals[entailmentPos], vals[contraPos] }
                     )[0];
                 }
             } else {
@@ -194,23 +193,16 @@ public class ZeroShotClassificationProcessor implements NlpTask.Processor {
             }
             int[] sortedIndices = IntStream.range(0, normalizedScores.length)
                 .boxed()
-                .sorted(Comparator.comparing(i -> normalizedScores[(Integer)i]).reversed())
+                .sorted(Comparator.comparing(i -> normalizedScores[(Integer) i]).reversed())
                 .mapToInt(i -> i)
                 .toArray();
 
-            return new ClassificationInferenceResults(
-                sortedIndices[0],
+            return new NlpClassificationInferenceResults(
                 labels[sortedIndices[0]],
-                Arrays.stream(sortedIndices)
-                    .mapToObj(i -> new TopClassEntry(labels[i], normalizedScores[i]))
-                    .collect(Collectors.toList()),
-                List.of(),
-                DEFAULT_TOP_CLASSES_RESULTS_FIELD,
+                Arrays.stream(sortedIndices).mapToObj(i -> new TopClassEntry(labels[i], normalizedScores[i])).collect(Collectors.toList()),
                 Optional.ofNullable(resultsField).orElse(DEFAULT_RESULTS_FIELD),
-                PredictionFieldType.STRING,
-                0,
                 normalizedScores[sortedIndices[0]],
-                null
+                tokenization.anyTruncated()
             );
         }
     }

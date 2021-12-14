@@ -77,45 +77,41 @@ public class Optimizer extends RuleExecutor<LogicalPlan> {
 
     @Override
     protected Iterable<RuleExecutor<LogicalPlan>.Batch> batches() {
-        Batch substitutions = new Batch("Substitution", Limiter.ONCE,
-                new ReplaceWildcards(),
-                new ReplaceSurrogateFunction(),
-                new ReplaceRegexMatch(),
-                new ReplaceNullChecks(),
-                new AddMandatoryJoinKeyFilter()
+        Batch substitutions = new Batch(
+            "Substitution",
+            Limiter.ONCE,
+            new ReplaceWildcards(),
+            new ReplaceSurrogateFunction(),
+            new ReplaceRegexMatch(),
+            new ReplaceNullChecks(),
+            new AddMandatoryJoinKeyFilter()
         );
 
-        Batch operators = new Batch("Operator Optimization",
-                new ConstantFolding(),
-                // boolean
-                new EqlBooleanSimplification(),
-                new LiteralsOnTheRight(),
-                new BinaryComparisonSimplification(),
-                new BooleanFunctionEqualsElimination(),
-                new CombineDisjunctionsToIn(),
-                new SimplifyComparisonsArithmetics(DataTypes::areCompatible),
-                // prune/elimination
-                new PruneFilters(),
-                new PruneLiteralsInOrderBy(),
-                new PruneCast(),
-                new CombineLimits(),
-                new PushDownAndCombineFilters()
-            );
+        Batch operators = new Batch(
+            "Operator Optimization",
+            new ConstantFolding(),
+            // boolean
+            new EqlBooleanSimplification(),
+            new LiteralsOnTheRight(),
+            new BinaryComparisonSimplification(),
+            new BooleanFunctionEqualsElimination(),
+            new CombineDisjunctionsToIn(),
+            new SimplifyComparisonsArithmetics(DataTypes::areCompatible),
+            // prune/elimination
+            new PruneFilters(),
+            new PruneLiteralsInOrderBy(),
+            new PruneCast(),
+            new CombineLimits(),
+            new PushDownAndCombineFilters()
+        );
 
-        Batch constraints = new Batch("Infer constraints", Limiter.ONCE,
-                new PropagateJoinKeyConstraints());
+        Batch constraints = new Batch("Infer constraints", Limiter.ONCE, new PropagateJoinKeyConstraints());
 
-        Batch ordering = new Batch("Implicit Order",
-                new SortByLimit(),
-                new PushDownOrderBy());
+        Batch ordering = new Batch("Implicit Order", new SortByLimit(), new PushDownOrderBy());
 
-        Batch local = new Batch("Skip Elasticsearch",
-                new SkipEmptyFilter(),
-                new SkipEmptyJoin(),
-                new SkipQueryOnLimitZero());
+        Batch local = new Batch("Skip Elasticsearch", new SkipEmptyFilter(), new SkipEmptyJoin(), new SkipQueryOnLimitZero());
 
-        Batch label = new Batch("Set as Optimized", Limiter.ONCE,
-                new SetAsOptimized());
+        Batch label = new Batch("Set as Optimized", Limiter.ONCE, new SetAsOptimized());
 
         return asList(substitutions, operators, constraints, operators, ordering, local, label);
     }
@@ -153,8 +149,7 @@ public class Optimizer extends RuleExecutor<LogicalPlan> {
         private static boolean isWildcard(Expression expr) {
             if (expr instanceof Literal) {
                 Object value = expr.fold();
-                if (value instanceof String) {
-                    String string = (String) value;
+                if (value instanceof String string) {
                     return string.contains("*") || string.contains("?");
                 }
             }
@@ -384,14 +379,10 @@ public class Optimizer extends RuleExecutor<LogicalPlan> {
             List<Constraint> constraints = new ArrayList<>();
 
             // collect constraints for each filter
-            join.queries().forEach(k ->
-                k.forEachDown(Filter.class, f -> constraints.addAll(detectKeyConstraints(f.condition(), k))
-                ));
+            join.queries().forEach(k -> k.forEachDown(Filter.class, f -> constraints.addAll(detectKeyConstraints(f.condition(), k))));
 
             if (constraints.isEmpty() == false) {
-                List<KeyedFilter> queries = join.queries().stream()
-                        .map(k -> addConstraint(k, constraints))
-                        .collect(toList());
+                List<KeyedFilter> queries = join.queries().stream().map(k -> addConstraint(k, constraints)).collect(toList());
 
                 join = join.with(queries, join.until(), join.direction());
             }
@@ -427,17 +418,15 @@ public class Optimizer extends RuleExecutor<LogicalPlan> {
 
         // adapt constraint to the given filter by replacing the keys accordingly in the expressions
         private KeyedFilter addConstraint(KeyedFilter k, List<Constraint> constraints) {
-            Expression constraint = Predicates.combineAnd(constraints.stream()
-                .map(c -> c.constraintFor(k))
-                .filter(Objects::nonNull)
-                .collect(toList()));
+            Expression constraint = Predicates.combineAnd(
+                constraints.stream().map(c -> c.constraintFor(k)).filter(Objects::nonNull).collect(toList())
+            );
 
             return constraint != null
-                    ? new KeyedFilter(k.source(), new Filter(k.source(), k.child(), constraint), k.keys(), k.timestamp(), k.tiebreaker())
-                    : k;
+                ? new KeyedFilter(k.source(), new Filter(k.source(), k.child(), constraint), k.keys(), k.timestamp(), k.tiebreaker())
+                : k;
         }
     }
-
 
     /**
      * Align the implicit order with the limit (head means ASC or tail means DESC).
@@ -448,8 +437,7 @@ public class Optimizer extends RuleExecutor<LogicalPlan> {
         protected LogicalPlan rule(LimitWithOffset limit) {
             if (limit.limit().foldable()) {
                 LogicalPlan child = limit.child();
-                if (child instanceof OrderBy) {
-                    OrderBy ob = (OrderBy) child;
+                if (child instanceof OrderBy ob) {
                     if (PushDownOrderBy.isDefaultOrderBy(ob)) {
                         int l = (Integer) limit.limit().fold();
                         OrderDirection direction = Integer.signum(l) > 0 ? OrderDirection.ASC : OrderDirection.DESC;
@@ -480,8 +468,7 @@ public class Optimizer extends RuleExecutor<LogicalPlan> {
                 // but if the order is descending, apply that only to the first query
                 // which is used to discover the window for which matching is being applied.
                 //
-                if (child instanceof Join) {
-                    Join join = (Join) child;
+                if (child instanceof Join join) {
                     List<KeyedFilter> queries = join.queries();
 
                     // the main reason DESC is used is the lack of search_before (which is emulated through search_after + ASC)
@@ -521,8 +508,12 @@ public class Optimizer extends RuleExecutor<LogicalPlan> {
             boolean hasChanged = false;
             for (Order order : orders) {
                 if (order.direction() != direction) {
-                    order = new Order(order.source(), order.child(), direction,
-                            direction == OrderDirection.ASC ? NullsPosition.FIRST : NullsPosition.LAST);
+                    order = new Order(
+                        order.source(),
+                        order.child(),
+                        direction,
+                        direction == OrderDirection.ASC ? NullsPosition.FIRST : NullsPosition.LAST
+                    );
                     hasChanged = true;
                 }
                 changed.add(order);

@@ -27,16 +27,16 @@ import org.elasticsearch.cluster.service.ClusterService;
 import org.elasticsearch.common.bytes.BytesReference;
 import org.elasticsearch.common.collect.ImmutableOpenMap;
 import org.elasticsearch.common.settings.Settings;
-import org.elasticsearch.core.TimeValue;
 import org.elasticsearch.common.util.concurrent.ThreadContext;
+import org.elasticsearch.core.TimeValue;
+import org.elasticsearch.test.ESTestCase;
+import org.elasticsearch.threadpool.TestThreadPool;
+import org.elasticsearch.threadpool.ThreadPool;
 import org.elasticsearch.xcontent.DeprecationHandler;
 import org.elasticsearch.xcontent.NamedXContentRegistry;
 import org.elasticsearch.xcontent.XContentFactory;
 import org.elasticsearch.xcontent.XContentParser;
 import org.elasticsearch.xcontent.XContentType;
-import org.elasticsearch.test.ESTestCase;
-import org.elasticsearch.threadpool.TestThreadPool;
-import org.elasticsearch.threadpool.ThreadPool;
 import org.elasticsearch.xpack.core.ml.notifications.NotificationsIndex;
 import org.elasticsearch.xpack.core.template.IndexTemplateConfig;
 import org.junit.After;
@@ -55,8 +55,8 @@ import static org.hamcrest.Matchers.arrayContaining;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.greaterThanOrEqualTo;
 import static org.hamcrest.Matchers.lessThanOrEqualTo;
-import static org.mockito.Matchers.any;
-import static org.mockito.Matchers.eq;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -96,8 +96,7 @@ public class AbstractAuditorTests extends ESTestCase {
     }
 
     public void testInfo() throws IOException {
-        AbstractAuditor<AbstractAuditMessageTests.TestAuditMessage> auditor =
-            createTestAuditorWithTemplateInstalled(client);
+        AbstractAuditor<AbstractAuditMessageTests.TestAuditMessage> auditor = createTestAuditorWithTemplateInstalled();
         auditor.info("foo", "Here is my info");
 
         verify(client).execute(eq(IndexAction.INSTANCE), indexRequestCaptor.capture(), any());
@@ -108,14 +107,15 @@ public class AbstractAuditorTests extends ESTestCase {
         assertThat(auditMessage.getResourceId(), equalTo("foo"));
         assertThat(auditMessage.getMessage(), equalTo("Here is my info"));
         assertThat(auditMessage.getLevel(), equalTo(Level.INFO));
-        assertThat(auditMessage.getTimestamp().getTime(),
-            allOf(greaterThanOrEqualTo(startMillis), lessThanOrEqualTo(System.currentTimeMillis())));
+        assertThat(
+            auditMessage.getTimestamp().getTime(),
+            allOf(greaterThanOrEqualTo(startMillis), lessThanOrEqualTo(System.currentTimeMillis()))
+        );
         assertThat(auditMessage.getNodeName(), equalTo(TEST_NODE_NAME));
     }
 
     public void testWarning() throws IOException {
-        AbstractAuditor<AbstractAuditMessageTests.TestAuditMessage> auditor =
-            createTestAuditorWithTemplateInstalled(client);
+        AbstractAuditor<AbstractAuditMessageTests.TestAuditMessage> auditor = createTestAuditorWithTemplateInstalled();
         auditor.warning("bar", "Here is my warning");
 
         verify(client).execute(eq(IndexAction.INSTANCE), indexRequestCaptor.capture(), any());
@@ -126,14 +126,15 @@ public class AbstractAuditorTests extends ESTestCase {
         assertThat(auditMessage.getResourceId(), equalTo("bar"));
         assertThat(auditMessage.getMessage(), equalTo("Here is my warning"));
         assertThat(auditMessage.getLevel(), equalTo(Level.WARNING));
-        assertThat(auditMessage.getTimestamp().getTime(),
-            allOf(greaterThanOrEqualTo(startMillis), lessThanOrEqualTo(System.currentTimeMillis())));
+        assertThat(
+            auditMessage.getTimestamp().getTime(),
+            allOf(greaterThanOrEqualTo(startMillis), lessThanOrEqualTo(System.currentTimeMillis()))
+        );
         assertThat(auditMessage.getNodeName(), equalTo(TEST_NODE_NAME));
     }
 
     public void testError() throws IOException {
-        AbstractAuditor<AbstractAuditMessageTests.TestAuditMessage> auditor =
-            createTestAuditorWithTemplateInstalled(client);
+        AbstractAuditor<AbstractAuditMessageTests.TestAuditMessage> auditor = createTestAuditorWithTemplateInstalled();
         auditor.error("foobar", "Here is my error");
 
         verify(client).execute(eq(IndexAction.INSTANCE), indexRequestCaptor.capture(), any());
@@ -144,15 +145,18 @@ public class AbstractAuditorTests extends ESTestCase {
         assertThat(auditMessage.getResourceId(), equalTo("foobar"));
         assertThat(auditMessage.getMessage(), equalTo("Here is my error"));
         assertThat(auditMessage.getLevel(), equalTo(Level.ERROR));
-        assertThat(auditMessage.getTimestamp().getTime(),
-            allOf(greaterThanOrEqualTo(startMillis), lessThanOrEqualTo(System.currentTimeMillis())));
+        assertThat(
+            auditMessage.getTimestamp().getTime(),
+            allOf(greaterThanOrEqualTo(startMillis), lessThanOrEqualTo(System.currentTimeMillis()))
+        );
         assertThat(auditMessage.getNodeName(), equalTo(TEST_NODE_NAME));
     }
 
     public void testAuditingBeforeTemplateInstalled() throws Exception {
         CountDownLatch writeSomeDocsBeforeTemplateLatch = new CountDownLatch(1);
-        AbstractAuditor<AbstractAuditMessageTests.TestAuditMessage> auditor =
-            createTestAuditorWithoutTemplate(client, writeSomeDocsBeforeTemplateLatch);
+        AbstractAuditor<AbstractAuditMessageTests.TestAuditMessage> auditor = createTestAuditorWithoutTemplate(
+            writeSomeDocsBeforeTemplateLatch
+        );
 
         auditor.error("foobar", "Here is my error to queue");
         auditor.warning("foobar", "Here is my warning to queue");
@@ -164,9 +168,7 @@ public class AbstractAuditorTests extends ESTestCase {
 
         // the back log will be written some point later
         ArgumentCaptor<BulkRequest> bulkCaptor = ArgumentCaptor.forClass(BulkRequest.class);
-        assertBusy(() ->
-            verify(client, times(1)).execute(eq(BulkAction.INSTANCE), bulkCaptor.capture(), any())
-        );
+        assertBusy(() -> verify(client, times(1)).execute(eq(BulkAction.INSTANCE), bulkCaptor.capture(), any()));
 
         BulkRequest bulkRequest = bulkCaptor.getValue();
         assertThat(bulkRequest.numberOfActions(), equalTo(3));
@@ -177,13 +179,14 @@ public class AbstractAuditorTests extends ESTestCase {
 
     public void testMaxBufferSize() throws Exception {
         CountDownLatch writeSomeDocsBeforeTemplateLatch = new CountDownLatch(1);
-        AbstractAuditor<AbstractAuditMessageTests.TestAuditMessage> auditor =
-            createTestAuditorWithoutTemplate(client, writeSomeDocsBeforeTemplateLatch);
+        AbstractAuditor<AbstractAuditMessageTests.TestAuditMessage> auditor = createTestAuditorWithoutTemplate(
+            writeSomeDocsBeforeTemplateLatch
+        );
 
         int numThreads = 2;
         int numMessagesToWrite = (AbstractAuditor.MAX_BUFFER_SIZE / numThreads) + 10;
         Runnable messageWrites = () -> {
-            for (int i=0; i<numMessagesToWrite; i++ ) {
+            for (int i = 0; i < numMessagesToWrite; i++) {
                 auditor.info("foobar", "filling the buffer");
             }
         };
@@ -202,7 +205,7 @@ public class AbstractAuditorTests extends ESTestCase {
         return AbstractAuditMessageTests.TestAuditMessage.PARSER.apply(parser, null);
     }
 
-    private TestAuditor createTestAuditorWithTemplateInstalled(Client client) {
+    private TestAuditor createTestAuditorWithTemplateInstalled() {
         ImmutableOpenMap.Builder<String, IndexTemplateMetadata> templates = ImmutableOpenMap.builder(1);
         templates.put(TEST_INDEX, mock(IndexTemplateMetadata.class));
         Map<String, ComposableIndexTemplate> templatesV2 = Collections.singletonMap(TEST_INDEX, mock(ComposableIndexTemplate.class));
@@ -221,14 +224,13 @@ public class AbstractAuditorTests extends ESTestCase {
     }
 
     @SuppressWarnings("unchecked")
-    private TestAuditor createTestAuditorWithoutTemplate(Client client, CountDownLatch latch) {
+    private TestAuditor createTestAuditorWithoutTemplate(CountDownLatch latch) {
         if (Mockito.mockingDetails(client).isMock() == false) {
             throw new AssertionError("client should be a mock");
         }
 
         doAnswer(invocationOnMock -> {
-            ActionListener<AcknowledgedResponse> listener =
-                (ActionListener<AcknowledgedResponse>)invocationOnMock.getArguments()[2];
+            ActionListener<AcknowledgedResponse> listener = (ActionListener<AcknowledgedResponse>) invocationOnMock.getArguments()[2];
 
             Runnable onPutTemplate = () -> {
                 try {
@@ -268,12 +270,25 @@ public class AbstractAuditorTests extends ESTestCase {
     public static class TestAuditor extends AbstractAuditor<AbstractAuditMessageTests.TestAuditMessage> {
 
         TestAuditor(Client client, String nodeName, ClusterService clusterService) {
-            super(new OriginSettingClient(client, TEST_ORIGIN), TEST_INDEX,
-                new IndexTemplateConfig(TEST_INDEX,
-                    "/org/elasticsearch/xpack/core/ml/notifications_index_template.json", Version.CURRENT.id, "xpack.ml.version",
-                    Map.of("xpack.ml.version.id", String.valueOf(Version.CURRENT.id),
-                        "xpack.ml.notifications.mappings", NotificationsIndex.mapping())),
-                nodeName, AbstractAuditMessageTests.TestAuditMessage::new, clusterService);
+            super(
+                new OriginSettingClient(client, TEST_ORIGIN),
+                TEST_INDEX,
+                new IndexTemplateConfig(
+                    TEST_INDEX,
+                    "/org/elasticsearch/xpack/core/ml/notifications_index_template.json",
+                    Version.CURRENT.id,
+                    "xpack.ml.version",
+                    Map.of(
+                        "xpack.ml.version.id",
+                        String.valueOf(Version.CURRENT.id),
+                        "xpack.ml.notifications.mappings",
+                        NotificationsIndex.mapping()
+                    )
+                ),
+                nodeName,
+                AbstractAuditMessageTests.TestAuditMessage::new,
+                clusterService
+            );
         }
     }
 }

@@ -18,10 +18,11 @@ import org.elasticsearch.script.field.DelegateDocValuesField;
 import org.elasticsearch.test.ESTestCase;
 import org.junit.Before;
 
+import java.io.IOException;
 import java.util.function.Function;
 
 import static org.mockito.AdditionalAnswers.returnsFirstArg;
-import static org.mockito.Matchers.anyObject;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -39,16 +40,19 @@ public class LeafDocLookupTests extends ESTestCase {
 
         MappedFieldType fieldType1 = mock(MappedFieldType.class);
         when(fieldType1.name()).thenReturn("field");
-        when(fieldType1.valueForDisplay(anyObject())).then(returnsFirstArg());
+        when(fieldType1.valueForDisplay(any())).then(returnsFirstArg());
         IndexFieldData<?> fieldData1 = createFieldData(docValues, "field");
 
         MappedFieldType fieldType2 = mock(MappedFieldType.class);
         when(fieldType1.name()).thenReturn("alias");
-        when(fieldType1.valueForDisplay(anyObject())).then(returnsFirstArg());
+        when(fieldType1.valueForDisplay(any())).then(returnsFirstArg());
         IndexFieldData<?> fieldData2 = createFieldData(docValues, "alias");
 
-        docLookup = new LeafDocLookup(field -> field.equals("field") ? fieldType1 : field.equals("alias") ? fieldType2 : null,
-            fieldType -> fieldType == fieldType1 ? fieldData1 : fieldType == fieldType2 ? fieldData2 : null, null);
+        docLookup = new LeafDocLookup(
+            field -> field.equals("field") ? fieldType1 : field.equals("alias") ? fieldType2 : null,
+            fieldType -> fieldType == fieldType1 ? fieldData1 : fieldType == fieldType2 ? fieldData2 : null,
+            null
+        );
     }
 
     public void testBasicLookup() {
@@ -61,15 +65,14 @@ public class LeafDocLookupTests extends ESTestCase {
         assertEquals(docValues, fetchedDocValues);
     }
 
-    public void testFlattenedField() {
+    public void testFlattenedField() throws IOException {
         ScriptDocValues<?> docValues1 = mock(ScriptDocValues.class);
         IndexFieldData<?> fieldData1 = createFieldData(docValues1, "flattened.key1");
 
         ScriptDocValues<?> docValues2 = mock(ScriptDocValues.class);
         IndexFieldData<?> fieldData2 = createFieldData(docValues2, "flattened.key2");
 
-        FlattenedFieldMapper fieldMapper = new FlattenedFieldMapper.Builder("field")
-            .build(MapperBuilderContext.ROOT);
+        FlattenedFieldMapper fieldMapper = new FlattenedFieldMapper.Builder("field").build(MapperBuilderContext.ROOT);
         DynamicFieldType fieldType = fieldMapper.fieldType();
         MappedFieldType fieldType1 = fieldType.getChildFieldType("key1");
         MappedFieldType fieldType2 = fieldType.getChildFieldType("key2");
@@ -93,14 +96,19 @@ public class LeafDocLookupTests extends ESTestCase {
         assertEquals(docValues2, docLookup.get("flattened.key2"));
     }
 
-    private IndexFieldData<?> createFieldData(ScriptDocValues<?> scriptDocValues, String name) {
-        DelegateDocValuesField delegateDocValuesField = new DelegateDocValuesField(scriptDocValues, name);
+    private IndexFieldData<?> createFieldData(ScriptDocValues<?> scriptDocValues, String name) throws IOException {
+        DelegateDocValuesField delegateDocValuesField = new DelegateDocValuesField(scriptDocValues, name) {
+            @Override
+            public void setNextDocId(int id) {
+                // do nothing
+            }
+        };
         LeafFieldData leafFieldData = mock(LeafFieldData.class);
         doReturn(delegateDocValuesField).when(leafFieldData).getScriptField(name);
 
         IndexFieldData<?> fieldData = mock(IndexFieldData.class);
         when(fieldData.getFieldName()).thenReturn(name);
-        doReturn(leafFieldData).when(fieldData).load(anyObject());
+        doReturn(leafFieldData).when(fieldData).load(any());
 
         return fieldData;
     }

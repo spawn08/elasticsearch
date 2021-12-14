@@ -33,9 +33,11 @@ import org.elasticsearch.xpack.core.ssl.SSLService;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Iterator;
 import java.util.List;
 import java.util.function.Consumer;
 
+import static org.elasticsearch.threadpool.ThreadPool.Names.GENERIC;
 import static org.elasticsearch.xpack.core.ClientHelper.SECURITY_ORIGIN;
 import static org.elasticsearch.xpack.core.XPackSettings.ENROLLMENT_ENABLED;
 
@@ -60,50 +62,63 @@ public class InternalEnrollmentTokenGenerator extends BaseEnrollmentTokenGenerat
      * In case of errors, including due to issues with the node's configuration, a {@code null} token is returned, and the exception
      * is logged but no exception is thrown.
      */
-    public void maybeCreateNodeEnrollmentToken(Consumer<String> consumer) {
+    public void maybeCreateNodeEnrollmentToken(Consumer<String> consumer, Iterator<TimeValue> backoff) {
         // the enrollment token can only be used against the node that generated it
-        final NodesInfoRequest nodesInfoRequest =
-            new NodesInfoRequest().nodesIds("_local").addMetrics(NodesInfoRequest.Metric.HTTP.metricName(),
-                NodesInfoRequest.Metric.TRANSPORT.metricName());
+        final NodesInfoRequest nodesInfoRequest = new NodesInfoRequest().nodesIds("_local")
+            .addMetrics(NodesInfoRequest.Metric.HTTP.metricName(), NodesInfoRequest.Metric.TRANSPORT.metricName());
+
         client.execute(NodesInfoAction.INSTANCE, nodesInfoRequest, ActionListener.wrap(response -> {
             assert response.getNodes().size() == 1;
             NodeInfo nodeInfo = response.getNodes().get(0);
             TransportInfo transportInfo = nodeInfo.getInfo(TransportInfo.class);
-            boolean noNonLocalTransportAddresses = splitAddresses(getAllTransportAddresses(transportInfo)).v2().isEmpty();
-            if (noNonLocalTransportAddresses) {
-                LOGGER.info("Will not generate node enrollment token because node is only bound on localhost for transport " +
-                    "and cannot connect to nodes from other hosts");
-                // empty enrollment token when skip
-                consumer.accept("");
-                return;
-            }
             HttpInfo httpInfo = nodeInfo.getInfo(HttpInfo.class);
-            boolean noNonLocalHttpAddresses = splitAddresses(getAllHttpAddresses(httpInfo)).v2().isEmpty();
-            if (noNonLocalHttpAddresses) {
-                LOGGER.info("Will not generate node enrollment token because node is only bound on localhost for HTTPS " +
-                    "and cannot enroll nodes from other hosts");
-                // empty enrollment token when skip
-                consumer.accept("");
-                return;
-            }
-            LOGGER.debug("Attempting to generate the node enrollment token");
-            assembleToken(EnrollmentTokenType.NODE, httpInfo, token -> {
-                if (null == token) {
-                    consumer.accept(null);
+            if (null == transportInfo || null == httpInfo) {
+                if (backoff.hasNext()) {
+                    LOGGER.debug("Local node's HTTP/transport info is not yet available, will retry...");
+                    client.threadPool().schedule(() -> maybeCreateNodeEnrollmentToken(consumer, backoff), backoff.next(), GENERIC);
                 } else {
-                    try {
-                        LOGGER.debug("Successfully generated the node enrollment token");
-                        consumer.accept(token.getEncoded());
-                    } catch (Exception e) {
-                        LOGGER.error("Failed to encode node enrollment token", e);
-                        // null enrollment token when error
-                        consumer.accept(null);
-                    }
+                    LOGGER.warn("Unable to get local node's HTTP/transport info after all retries.");
+                    consumer.accept(null);
                 }
-
-            });
+            } else {
+                boolean noNonLocalTransportAddresses = splitAddresses(getAllTransportAddresses(transportInfo)).v2().isEmpty();
+                if (noNonLocalTransportAddresses) {
+                    LOGGER.info(
+                        "Will not generate node enrollment token because node is only bound on localhost for transport "
+                            + "and cannot connect to nodes from other hosts"
+                    );
+                    // empty enrollment token when skip
+                    consumer.accept("");
+                    return;
+                }
+                boolean noNonLocalHttpAddresses = splitAddresses(getAllHttpAddresses(httpInfo)).v2().isEmpty();
+                if (noNonLocalHttpAddresses) {
+                    LOGGER.info(
+                        "Will not generate node enrollment token because node is only bound on localhost for HTTPS "
+                            + "and cannot enroll nodes from other hosts"
+                    );
+                    // empty enrollment token when skip
+                    consumer.accept("");
+                    return;
+                }
+                LOGGER.debug("Attempting to generate the node enrollment token");
+                assembleToken(EnrollmentTokenType.NODE, httpInfo, token -> {
+                    if (null == token) {
+                        consumer.accept(null);
+                    } else {
+                        try {
+                            LOGGER.debug("Successfully generated the node enrollment token");
+                            consumer.accept(token.getEncoded());
+                        } catch (Exception e) {
+                            LOGGER.error("Failed to encode node enrollment token", e);
+                            // null enrollment token when error
+                            consumer.accept(null);
+                        }
+                    }
+                });
+            }
         }, e -> {
-            LOGGER.error("Failed to create node enrollment token when retrieving local nodes HTTP info", e);
+            LOGGER.error("Failed to create node enrollment token when retrieving local node's HTTP/transport info", e);
             // null enrollment token when error
             consumer.accept(null);
         }));
@@ -114,14 +129,25 @@ public class InternalEnrollmentTokenGenerator extends BaseEnrollmentTokenGenerat
      * In case of errors, including due to issues with the node's configuration, a {@code null} token is returned, and the exception
      * is logged but no exception is thrown.
      */
-    public void createKibanaEnrollmentToken(Consumer<EnrollmentToken> consumer) {
+    public void createKibanaEnrollmentToken(Consumer<EnrollmentToken> consumer, Iterator<TimeValue> backoff) {
         // the enrollment token can only be used against the node that generated it
         final NodesInfoRequest nodesInfoRequest = new NodesInfoRequest().nodesIds("_local")
             .addMetric(NodesInfoRequest.Metric.HTTP.metricName());
         client.execute(NodesInfoAction.INSTANCE, nodesInfoRequest, ActionListener.wrap(response -> {
             assert response.getNodes().size() == 1;
             NodeInfo nodeInfo = response.getNodes().get(0);
-            assembleToken(EnrollmentTokenType.KIBANA, nodeInfo.getInfo(HttpInfo.class), consumer);
+            HttpInfo httpInfo = nodeInfo.getInfo(HttpInfo.class);
+            if (null == httpInfo) {
+                if (backoff.hasNext()) {
+                    LOGGER.info("Local node's HTTP info is not yet available, will retry...");
+                    client.threadPool().schedule(() -> createKibanaEnrollmentToken(consumer, backoff), backoff.next(), GENERIC);
+                } else {
+                    LOGGER.warn("Unable to get local node's HTTP info after all retries.");
+                    consumer.accept(null);
+                }
+            } else {
+                assembleToken(EnrollmentTokenType.KIBANA, httpInfo, consumer);
+            }
         }, e -> {
             LOGGER.error("Failed to create kibana enrollment token when retrieving local nodes HTTP info", e);
             consumer.accept(null);
@@ -130,8 +156,14 @@ public class InternalEnrollmentTokenGenerator extends BaseEnrollmentTokenGenerat
 
     private void assembleToken(EnrollmentTokenType enrollTokenType, HttpInfo httpInfo, Consumer<EnrollmentToken> consumer) {
         if (false == ENROLLMENT_ENABLED.get(environment.settings())) {
-            LOGGER.error("Cannot create enrollment token [" + enrollTokenType + "] because enrollment is disabled " +
-                "with setting [" + ENROLLMENT_ENABLED.getKey() + "] set to [false]");
+            LOGGER.error(
+                "Cannot create enrollment token ["
+                    + enrollTokenType
+                    + "] because enrollment is disabled "
+                    + "with setting ["
+                    + ENROLLMENT_ENABLED.getKey()
+                    + "] set to [false]"
+            );
             consumer.accept(null);
             return;
         }
@@ -139,8 +171,10 @@ public class InternalEnrollmentTokenGenerator extends BaseEnrollmentTokenGenerat
         try {
             fingerprint = getHttpsCaFingerprint();
         } catch (Exception e) {
-            LOGGER.error("Failed to create enrollment token when computing HTTPS CA fingerprint, possibly the certs are not auto-generated",
-                e);
+            LOGGER.error(
+                "Failed to create enrollment token when computing HTTPS CA fingerprint, possibly the certs are not auto-generated",
+                e
+            );
             consumer.accept(null);
             return;
         }
@@ -160,12 +194,7 @@ public class InternalEnrollmentTokenGenerator extends BaseEnrollmentTokenGenerat
         );
         client.execute(CreateApiKeyAction.INSTANCE, apiKeyRequest, ActionListener.wrap(createApiKeyResponse -> {
             final String apiKey = createApiKeyResponse.getId() + ":" + createApiKeyResponse.getKey().toString();
-            final EnrollmentToken enrollmentToken = new EnrollmentToken(
-                apiKey,
-                fingerprint,
-                Version.CURRENT.toString(),
-                tokenAddresses
-            );
+            final EnrollmentToken enrollmentToken = new EnrollmentToken(apiKey, fingerprint, Version.CURRENT.toString(), tokenAddresses);
             consumer.accept(enrollmentToken);
         }, e -> {
             LOGGER.error("Failed to create enrollment token when generating API key", e);
@@ -186,16 +215,13 @@ public class InternalEnrollmentTokenGenerator extends BaseEnrollmentTokenGenerat
     private static List<String> getAllTransportAddresses(TransportInfo transportInfo) {
         final List<String> transportAddressesList = new ArrayList<>();
         collectAllAddresses(transportInfo.getAddress(), transportAddressesList);
-        transportInfo.getProfileAddresses().values().forEach(profileAddress ->
-            collectAllAddresses(profileAddress, transportAddressesList));
+        transportInfo.getProfileAddresses().values().forEach(profileAddress -> collectAllAddresses(profileAddress, transportAddressesList));
         return transportAddressesList;
     }
 
     private static void collectAllAddresses(BoundTransportAddress address, List<String> collectedAddressesList) {
         collectedAddressesList.add(address.publishAddress().toString());
-        Arrays.stream(address.boundAddresses())
-            .map(TransportAddress::toString)
-            .forEach(collectedAddressesList::add);
+        Arrays.stream(address.boundAddresses()).map(TransportAddress::toString).forEach(collectedAddressesList::add);
     }
 
     private enum EnrollmentTokenType {

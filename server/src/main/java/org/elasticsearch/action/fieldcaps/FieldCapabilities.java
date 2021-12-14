@@ -9,14 +9,14 @@
 package org.elasticsearch.action.fieldcaps;
 
 import org.elasticsearch.Version;
-import org.elasticsearch.index.mapper.TimeSeriesParams;
-import org.elasticsearch.xcontent.InstantiatingObjectParser;
-import org.elasticsearch.xcontent.ParseField;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.common.io.stream.Writeable;
+import org.elasticsearch.index.mapper.TimeSeriesParams;
 import org.elasticsearch.xcontent.ConstructingObjectParser;
+import org.elasticsearch.xcontent.InstantiatingObjectParser;
+import org.elasticsearch.xcontent.ParseField;
 import org.elasticsearch.xcontent.ParserConstructor;
 import org.elasticsearch.xcontent.ToXContentObject;
 import org.elasticsearch.xcontent.XContentBuilder;
@@ -54,7 +54,7 @@ public class FieldCapabilities implements Writeable, ToXContentObject {
     private static final ParseField NON_SEARCHABLE_INDICES_FIELD = new ParseField("non_searchable_indices");
     private static final ParseField NON_AGGREGATABLE_INDICES_FIELD = new ParseField("non_aggregatable_indices");
     private static final ParseField NON_DIMENSION_INDICES_FIELD = new ParseField("non_dimension_indices");
-    private static final ParseField METRIC_CONFLICTS_INDICES_FIELD = new ParseField("mertric_conflicts_indices");
+    private static final ParseField METRIC_CONFLICTS_INDICES_FIELD = new ParseField("metric_conflicts_indices");
     private static final ParseField META_FIELD = new ParseField("meta");
 
     private final String name;
@@ -92,18 +92,21 @@ public class FieldCapabilities implements Writeable, ToXContentObject {
      * @param metricConflictsIndices The list of indices where this field is has different metric types or not mark as a metric
      * @param meta Merged metadata across indices.
      */
-    public FieldCapabilities(String name, String type,
-                             boolean isMetadataField,
-                             boolean isSearchable,
-                             boolean isAggregatable,
-                             boolean isDimension,
-                             TimeSeriesParams.MetricType metricType,
-                             String[] indices,
-                             String[] nonSearchableIndices,
-                             String[] nonAggregatableIndices,
-                             String[] nonDimensionIndices,
-                             String[] metricConflictsIndices,
-                             Map<String, Set<String>> meta) {
+    public FieldCapabilities(
+        String name,
+        String type,
+        boolean isMetadataField,
+        boolean isSearchable,
+        boolean isAggregatable,
+        boolean isDimension,
+        TimeSeriesParams.MetricType metricType,
+        String[] indices,
+        String[] nonSearchableIndices,
+        String[] nonAggregatableIndices,
+        String[] nonDimensionIndices,
+        String[] metricConflictsIndices,
+        Map<String, Set<String>> meta
+    ) {
         this.name = name;
         this.type = type;
         this.isMetadataField = isMetadataField;
@@ -135,14 +138,17 @@ public class FieldCapabilities implements Writeable, ToXContentObject {
      *                               or null if the field is aggregatable in all indices.
      * @param meta Merged metadata across indices.
      */
-    public FieldCapabilities(String name, String type,
-                             boolean isMetadataField,
-                             boolean isSearchable,
-                             boolean isAggregatable,
-                             String[] indices,
-                             String[] nonSearchableIndices,
-                             String[] nonAggregatableIndices,
-                             Map<String, Set<String>> meta) {
+    public FieldCapabilities(
+        String name,
+        String type,
+        boolean isMetadataField,
+        boolean isSearchable,
+        boolean isAggregatable,
+        String[] indices,
+        String[] nonSearchableIndices,
+        String[] nonAggregatableIndices,
+        Map<String, Set<String>> meta
+    ) {
         this(
             name,
             type,
@@ -409,7 +415,6 @@ public class FieldCapabilities implements Writeable, ToXContentObject {
         return nonAggregatableIndices;
     }
 
-
     /**
      * The list of indices where this field has different dimension or metric flag
      */
@@ -436,19 +441,19 @@ public class FieldCapabilities implements Writeable, ToXContentObject {
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
         FieldCapabilities that = (FieldCapabilities) o;
-        return isMetadataField == that.isMetadataField &&
-            isSearchable == that.isSearchable &&
-            isAggregatable == that.isAggregatable &&
-            isDimension == that.isDimension &&
-            Objects.equals(metricType, that.metricType) &&
-            Objects.equals(name, that.name) &&
-            Objects.equals(type, that.type) &&
-            Arrays.equals(indices, that.indices) &&
-            Arrays.equals(nonSearchableIndices, that.nonSearchableIndices) &&
-            Arrays.equals(nonAggregatableIndices, that.nonAggregatableIndices) &&
-            Arrays.equals(nonDimensionIndices, that.nonDimensionIndices) &&
-            Arrays.equals(metricConflictsIndices, that.metricConflictsIndices) &&
-            Objects.equals(meta, that.meta);
+        return isMetadataField == that.isMetadataField
+            && isSearchable == that.isSearchable
+            && isAggregatable == that.isAggregatable
+            && isDimension == that.isDimension
+            && Objects.equals(metricType, that.metricType)
+            && Objects.equals(name, that.name)
+            && Objects.equals(type, that.type)
+            && Arrays.equals(indices, that.indices)
+            && Arrays.equals(nonSearchableIndices, that.nonSearchableIndices)
+            && Arrays.equals(nonAggregatableIndices, that.nonAggregatableIndices)
+            && Arrays.equals(nonDimensionIndices, that.nonDimensionIndices)
+            && Arrays.equals(metricConflictsIndices, that.metricConflictsIndices)
+            && Objects.equals(meta, that.meta);
     }
 
     @Override
@@ -475,7 +480,7 @@ public class FieldCapabilities implements Writeable, ToXContentObject {
         private boolean isAggregatable;
         private boolean isDimension;
         private TimeSeriesParams.MetricType metricType;
-        private boolean mertricTypeIsSet;
+        private boolean metricTypeIsSet;
         private List<IndexCaps> indiceList;
         private Map<String, Set<String>> meta;
 
@@ -486,7 +491,7 @@ public class FieldCapabilities implements Writeable, ToXContentObject {
             this.isAggregatable = true;
             this.isDimension = true;
             this.metricType = null;
-            this.mertricTypeIsSet = false;
+            this.metricTypeIsSet = false;
             this.indiceList = new ArrayList<>();
             this.meta = new HashMap<>();
         }
@@ -511,17 +516,16 @@ public class FieldCapabilities implements Writeable, ToXContentObject {
             this.isDimension &= isDimension;
             // If we have discrepancy in metric types or in some indices this field is not marked as a metric field - we will
             // treat is a non-metric field and report this discrepancy in metricConflictsIndices
-            if (this.mertricTypeIsSet) {
+            if (this.metricTypeIsSet) {
                 if (this.metricType != metricType) {
                     this.metricType = null;
                 }
             } else {
-                this.mertricTypeIsSet = true;
+                this.metricTypeIsSet = true;
                 this.metricType = metricType;
             }
             for (Map.Entry<String, String> entry : meta.entrySet()) {
-                this.meta.computeIfAbsent(entry.getKey(), key -> new HashSet<>())
-                        .add(entry.getValue());
+                this.meta.computeIfAbsent(entry.getKey(), key -> new HashSet<>()).add(entry.getValue());
             }
         }
 
@@ -533,16 +537,13 @@ public class FieldCapabilities implements Writeable, ToXContentObject {
             final String[] indices;
             Collections.sort(indiceList, Comparator.comparing(o -> o.name));
             if (withIndices) {
-                indices = indiceList.stream()
-                    .map(caps -> caps.name)
-                    .toArray(String[]::new);
+                indices = indiceList.stream().map(caps -> caps.name).toArray(String[]::new);
             } else {
                 indices = null;
             }
 
             final String[] nonSearchableIndices;
-            if (isSearchable == false &&
-                    indiceList.stream().anyMatch((caps) -> caps.isSearchable)) {
+            if (isSearchable == false && indiceList.stream().anyMatch((caps) -> caps.isSearchable)) {
                 // Iff this field is searchable in some indices AND non-searchable in others
                 // we record the list of non-searchable indices
                 nonSearchableIndices = indiceList.stream()
@@ -554,8 +555,7 @@ public class FieldCapabilities implements Writeable, ToXContentObject {
             }
 
             final String[] nonAggregatableIndices;
-            if (isAggregatable == false &&
-                indiceList.stream().anyMatch((caps) -> caps.isAggregatable)) {
+            if (isAggregatable == false && indiceList.stream().anyMatch((caps) -> caps.isAggregatable)) {
                 // Iff this field is aggregatable in some indices AND non-searchable in others
                 // we keep the list of non-aggregatable indices
                 nonAggregatableIndices = indiceList.stream()
@@ -582,17 +582,15 @@ public class FieldCapabilities implements Writeable, ToXContentObject {
                 // Collect all indices that have this field. If it is marked differently in different indices, we cannot really
                 // make a decisions which index is "right" and which index is "wrong" so collecting all indices where this field
                 // is present is probably the only sensible thing to do here
-                metricConflictsIndices = indiceList.stream()
-                    .map(caps -> caps.name)
-                    .toArray(String[]::new);
+                metricConflictsIndices = indiceList.stream().map(caps -> caps.name).toArray(String[]::new);
             } else {
                 metricConflictsIndices = null;
             }
 
             final Function<Map.Entry<String, Set<String>>, Set<String>> entryValueFunction = Map.Entry::getValue;
-            Map<String, Set<String>> immutableMeta = meta.entrySet().stream()
-                    .collect(Collectors.toUnmodifiableMap(
-                            Map.Entry::getKey, entryValueFunction.andThen(Set::copyOf)));
+            Map<String, Set<String>> immutableMeta = meta.entrySet()
+                .stream()
+                .collect(Collectors.toUnmodifiableMap(Map.Entry::getKey, entryValueFunction.andThen(Set::copyOf)));
             return new FieldCapabilities(
                 name,
                 type,
