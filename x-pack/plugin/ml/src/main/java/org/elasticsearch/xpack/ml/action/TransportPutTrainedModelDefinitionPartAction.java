@@ -8,14 +8,13 @@ package org.elasticsearch.xpack.ml.action;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.apache.logging.log4j.message.ParameterizedMessage;
 import org.elasticsearch.ElasticsearchStatusException;
 import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.action.support.ActionFilters;
 import org.elasticsearch.action.support.HandledTransportAction;
 import org.elasticsearch.action.support.master.AcknowledgedResponse;
-import org.elasticsearch.client.Client;
-import org.elasticsearch.client.OriginSettingClient;
+import org.elasticsearch.client.internal.Client;
+import org.elasticsearch.client.internal.OriginSettingClient;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.license.LicenseUtils;
 import org.elasticsearch.license.XPackLicenseState;
@@ -33,6 +32,7 @@ import org.elasticsearch.xpack.core.ml.inference.trainedmodel.TrainedModelLocati
 import org.elasticsearch.xpack.ml.inference.persistence.TrainedModelDefinitionDoc;
 import org.elasticsearch.xpack.ml.inference.persistence.TrainedModelProvider;
 
+import static org.elasticsearch.core.Strings.format;
 import static org.elasticsearch.xpack.core.ClientHelper.ML_ORIGIN;
 
 /**
@@ -104,10 +104,7 @@ public class TransportPutTrainedModelDefinitionPartAction extends HandledTranspo
                             .indices()
                             .prepareRefresh(indexName)
                             .execute(ActionListener.wrap(refreshed -> listener.onResponse(AcknowledgedResponse.TRUE), failure -> {
-                                logger.warn(
-                                    () -> new ParameterizedMessage("[{}] failed to refresh index [{}]", request.getModelId(), indexName),
-                                    failure
-                                );
+                                logger.warn(() -> format("[%s] failed to refresh index [%s]", request.getModelId(), indexName), failure);
                                 listener.onResponse(AcknowledgedResponse.TRUE);
                             }));
                         return;
@@ -117,6 +114,6 @@ public class TransportPutTrainedModelDefinitionPartAction extends HandledTranspo
             );
         }, listener::onFailure);
 
-        trainedModelProvider.getTrainedModel(request.getModelId(), GetTrainedModelsAction.Includes.empty(), configActionListener);
+        trainedModelProvider.getTrainedModel(request.getModelId(), GetTrainedModelsAction.Includes.empty(), null, configActionListener);
     }
 }

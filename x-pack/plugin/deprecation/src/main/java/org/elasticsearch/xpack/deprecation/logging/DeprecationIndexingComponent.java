@@ -19,8 +19,8 @@ import org.elasticsearch.action.bulk.BulkProcessor;
 import org.elasticsearch.action.bulk.BulkRequest;
 import org.elasticsearch.action.bulk.BulkResponse;
 import org.elasticsearch.action.index.IndexRequest;
-import org.elasticsearch.client.Client;
-import org.elasticsearch.client.OriginSettingClient;
+import org.elasticsearch.client.internal.Client;
+import org.elasticsearch.client.internal.OriginSettingClient;
 import org.elasticsearch.cluster.ClusterChangedEvent;
 import org.elasticsearch.cluster.ClusterStateListener;
 import org.elasticsearch.cluster.service.ClusterService;
@@ -29,7 +29,6 @@ import org.elasticsearch.common.logging.ECSJsonLayout;
 import org.elasticsearch.common.logging.Loggers;
 import org.elasticsearch.common.logging.RateLimitingFilter;
 import org.elasticsearch.common.settings.Settings;
-import org.elasticsearch.common.unit.ByteSizeUnit;
 import org.elasticsearch.common.unit.ByteSizeValue;
 import org.elasticsearch.common.util.concurrent.EsExecutors;
 import org.elasticsearch.core.TimeValue;
@@ -181,7 +180,7 @@ public class DeprecationIndexingComponent extends AbstractLifecycleComponent imp
             .setBackoffPolicy(BackoffPolicy.exponentialBackoff(TimeValue.timeValueMillis(1000), 3))
             .setConcurrentRequests(Math.max(2, EsExecutors.allocatedProcessors(settings)))
             .setBulkActions(-1)
-            .setBulkSize(new ByteSizeValue(-1, ByteSizeUnit.BYTES))
+            .setBulkSize(ByteSizeValue.MINUS_ONE)
             .setFlushInterval(TimeValue.timeValueSeconds(5))
             .setFlushCondition(() -> flushEnabled.get())
             .build();

@@ -13,8 +13,8 @@ import org.elasticsearch.action.admin.cluster.state.ClusterStateAction;
 import org.elasticsearch.action.admin.cluster.state.ClusterStateRequest;
 import org.elasticsearch.action.admin.cluster.state.ClusterStateResponse;
 import org.elasticsearch.action.support.IndicesOptions;
-import org.elasticsearch.client.Requests;
-import org.elasticsearch.client.node.NodeClient;
+import org.elasticsearch.client.internal.Requests;
+import org.elasticsearch.client.internal.node.NodeClient;
 import org.elasticsearch.cluster.ClusterState;
 import org.elasticsearch.cluster.metadata.Metadata;
 import org.elasticsearch.common.Strings;
@@ -30,17 +30,18 @@ import org.elasticsearch.xcontent.ToXContentObject;
 import org.elasticsearch.xcontent.XContentBuilder;
 
 import java.io.IOException;
-import java.util.Collections;
 import java.util.EnumSet;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.function.LongSupplier;
 
 import static java.util.Collections.singletonMap;
+import static org.elasticsearch.common.util.set.Sets.addToCopy;
 import static org.elasticsearch.rest.RestRequest.Method.GET;
 
 public class RestClusterStateAction extends BaseRestHandler {
+
+    private static final Set<String> RESPONSE_PARAMS = addToCopy(Settings.FORMAT_PARAMS, "metric");
 
     private final SettingsFilter settingsFilter;
 
@@ -123,15 +124,6 @@ public class RestClusterStateAction extends BaseRestHandler {
                 }
             }.map(response -> new RestClusterStateResponse(clusterStateRequest, response, threadPool::relativeTimeInMillis))
         );
-    }
-
-    private static final Set<String> RESPONSE_PARAMS;
-
-    static {
-        final Set<String> responseParams = new HashSet<>();
-        responseParams.add("metric");
-        responseParams.addAll(Settings.FORMAT_PARAMS);
-        RESPONSE_PARAMS = Collections.unmodifiableSet(responseParams);
     }
 
     @Override

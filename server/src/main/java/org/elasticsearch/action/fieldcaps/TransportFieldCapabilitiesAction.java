@@ -8,15 +8,15 @@
 
 package org.elasticsearch.action.fieldcaps;
 
+import org.apache.lucene.util.ArrayUtil;
 import org.elasticsearch.ExceptionsHelper;
-import org.elasticsearch.Version;
 import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.action.ActionRunnable;
 import org.elasticsearch.action.OriginalIndices;
 import org.elasticsearch.action.support.ActionFilters;
 import org.elasticsearch.action.support.ChannelActionListener;
 import org.elasticsearch.action.support.HandledTransportAction;
-import org.elasticsearch.client.Client;
+import org.elasticsearch.client.internal.Client;
 import org.elasticsearch.cluster.ClusterState;
 import org.elasticsearch.cluster.block.ClusterBlockLevel;
 import org.elasticsearch.cluster.metadata.IndexNameExpressionResolver;
@@ -24,9 +24,11 @@ import org.elasticsearch.cluster.service.ClusterService;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.util.concurrent.CountDown;
+import org.elasticsearch.common.util.set.Sets;
 import org.elasticsearch.core.Tuple;
 import org.elasticsearch.index.shard.ShardId;
 import org.elasticsearch.indices.IndicesService;
+import org.elasticsearch.search.SearchService;
 import org.elasticsearch.tasks.Task;
 import org.elasticsearch.threadpool.ThreadPool;
 import org.elasticsearch.transport.RemoteClusterAware;
@@ -37,13 +39,19 @@ import org.elasticsearch.transport.TransportService;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
-import java.util.function.Predicate;
+import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
+import static org.elasticsearch.action.search.TransportSearchHelper.checkCCSVersionCompatibility;
 
 public class TransportFieldCapabilitiesAction extends HandledTransportAction<FieldCapabilitiesRequest, FieldCapabilitiesResponse> {
     public static final String ACTION_NODE_NAME = FieldCapabilitiesAction.NAME + "[n]";
@@ -53,8 +61,8 @@ public class TransportFieldCapabilitiesAction extends HandledTransportAction<Fie
     private final ClusterService clusterService;
     private final IndexNameExpressionResolver indexNameExpressionResolver;
 
-    private final FieldCapabilitiesFetcher fieldCapabilitiesFetcher;
-    private final Predicate<String> metadataFieldPred;
+    private final IndicesService indicesService;
+    private final boolean ccsCheckCompatibility;
 
     @Inject
     public TransportFieldCapabilitiesAction(
@@ -70,19 +78,21 @@ public class TransportFieldCapabilitiesAction extends HandledTransportAction<Fie
         this.transportService = transportService;
         this.clusterService = clusterService;
         this.indexNameExpressionResolver = indexNameExpressionResolver;
-        this.fieldCapabilitiesFetcher = new FieldCapabilitiesFetcher(indicesService);
-        final Set<String> metadataFields = indicesService.getAllMetadataFields();
-        this.metadataFieldPred = metadataFields::contains;
+        this.indicesService = indicesService;
         transportService.registerRequestHandler(
             ACTION_NODE_NAME,
             ThreadPool.Names.SEARCH_COORDINATION,
             FieldCapabilitiesNodeRequest::new,
             new NodeTransportHandler()
         );
+        this.ccsCheckCompatibility = SearchService.CCS_VERSION_CHECK_SETTING.get(clusterService.getSettings());
     }
 
     @Override
     protected void doExecute(Task task, FieldCapabilitiesRequest request, final ActionListener<FieldCapabilitiesResponse> listener) {
+        if (ccsCheckCompatibility) {
+            checkCCSVersionCompatibility(request);
+        }
         // retrieve the initial timestamp in case the action is a cross cluster search
         long nowInMillis = request.nowInMillis() == null ? System.currentTimeMillis() : request.nowInMillis();
         final ClusterState clusterState = clusterService.state();
@@ -105,6 +115,17 @@ public class TransportFieldCapabilitiesAction extends HandledTransportAction<Fie
         checkIndexBlocks(clusterState, concreteIndices);
 
         final Map<String, FieldCapabilitiesIndexResponse> indexResponses = Collections.synchronizedMap(new HashMap<>());
+        // This map is used to share the index response for indices which have the same index mapping hash to reduce the memory usage.
+        final Map<String, FieldCapabilitiesIndexResponse> indexMappingHashToResponses = Collections.synchronizedMap(new HashMap<>());
+        final Consumer<FieldCapabilitiesIndexResponse> handleIndexResponse = resp -> {
+            if (resp.canMatch() && resp.getIndexMappingHash() != null) {
+                FieldCapabilitiesIndexResponse curr = indexMappingHashToResponses.putIfAbsent(resp.getIndexMappingHash(), resp);
+                if (curr != null) {
+                    resp = new FieldCapabilitiesIndexResponse(resp.getIndexName(), curr.getIndexMappingHash(), curr.get(), true);
+                }
+            }
+            indexResponses.putIfAbsent(resp.getIndexName(), resp);
+        };
         final FailureCollector indexFailures = new FailureCollector();
         // One for each cluster including the local cluster
         final CountDown completionCounter = new CountDown(1 + remoteClusterIndices.size());
@@ -118,7 +139,7 @@ public class TransportFieldCapabilitiesAction extends HandledTransportAction<Fie
             nowInMillis,
             concreteIndices,
             threadPool.executor(ThreadPool.Names.SEARCH_COORDINATION),
-            indexResponse -> indexResponses.putIfAbsent(indexResponse.getIndexName(), indexResponse),
+            handleIndexResponse,
             indexFailures::collect,
             countDown
         );
@@ -134,7 +155,9 @@ public class TransportFieldCapabilitiesAction extends HandledTransportAction<Fie
             remoteClusterClient.fieldCaps(remoteRequest, ActionListener.wrap(response -> {
                 for (FieldCapabilitiesIndexResponse resp : response.getIndexResponses()) {
                     String indexName = RemoteClusterAware.buildRemoteIndexName(clusterAlias, resp.getIndexName());
-                    indexResponses.putIfAbsent(indexName, new FieldCapabilitiesIndexResponse(indexName, resp.get(), resp.canMatch()));
+                    handleIndexResponse.accept(
+                        new FieldCapabilitiesIndexResponse(indexName, resp.getIndexMappingHash(), resp.get(), resp.canMatch())
+                    );
                 }
                 for (FieldCapabilitiesFailure failure : response.getFailures()) {
                     Exception ex = failure.getException();
@@ -148,7 +171,7 @@ public class TransportFieldCapabilitiesAction extends HandledTransportAction<Fie
         }
     }
 
-    private void checkIndexBlocks(ClusterState clusterState, String[] concreteIndices) {
+    private static void checkIndexBlocks(ClusterState clusterState, String[] concreteIndices) {
         clusterState.blocks().globalBlockedRaiseException(ClusterBlockLevel.READ);
         for (String index : concreteIndices) {
             clusterState.blocks().indexBlockedRaiseException(ClusterBlockLevel.READ, index);
@@ -170,12 +193,7 @@ public class TransportFieldCapabilitiesAction extends HandledTransportAction<Fie
                         // fork off to the management pool for merging the responses as the operation can run for longer than is acceptable
                         // on a transport thread in case of large numbers of indices and/or fields
                         threadPool.executor(ThreadPool.Names.SEARCH_COORDINATION)
-                            .submit(
-                                ActionRunnable.supply(
-                                    listener,
-                                    () -> merge(indexResponses, request.includeUnmapped(), new ArrayList<>(failures))
-                                )
-                            );
+                            .submit(ActionRunnable.supply(listener, () -> merge(indexResponses, request, new ArrayList<>(failures))));
                     } else {
                         listener.onResponse(
                             new FieldCapabilitiesResponse(new ArrayList<>(indexResponses.values()), new ArrayList<>(failures))
@@ -204,60 +222,106 @@ public class TransportFieldCapabilitiesAction extends HandledTransportAction<Fie
         remoteRequest.indicesOptions(originalIndices.indicesOptions());
         remoteRequest.indices(originalIndices.indices());
         remoteRequest.fields(request.fields());
+        remoteRequest.filters(request.filters());
+        remoteRequest.types(request.types());
         remoteRequest.runtimeFields(request.runtimeFields());
         remoteRequest.indexFilter(request.indexFilter());
         remoteRequest.nowInMillis(nowInMillis);
         return remoteRequest;
     }
 
+    private static boolean hasSameMappingHash(FieldCapabilitiesIndexResponse r1, FieldCapabilitiesIndexResponse r2) {
+        return r1.getIndexMappingHash() != null
+            && r2.getIndexMappingHash() != null
+            && r1.getIndexMappingHash().equals(r2.getIndexMappingHash());
+    }
+
     private FieldCapabilitiesResponse merge(
-        Map<String, FieldCapabilitiesIndexResponse> indexResponses,
-        boolean includeUnmapped,
+        Map<String, FieldCapabilitiesIndexResponse> indexResponsesMap,
+        FieldCapabilitiesRequest request,
         List<FieldCapabilitiesFailure> failures
     ) {
-        String[] indices = indexResponses.keySet().stream().sorted().toArray(String[]::new);
+        final FieldCapabilitiesIndexResponse[] indexResponses = indexResponsesMap.values()
+            .stream()
+            .sorted(Comparator.comparing(FieldCapabilitiesIndexResponse::getIndexName))
+            .toArray(FieldCapabilitiesIndexResponse[]::new);
+        final String[] indices = Arrays.stream(indexResponses).map(FieldCapabilitiesIndexResponse::getIndexName).toArray(String[]::new);
         final Map<String, Map<String, FieldCapabilities.Builder>> responseMapBuilder = new HashMap<>();
-        for (FieldCapabilitiesIndexResponse response : indexResponses.values()) {
-            innerMerge(responseMapBuilder, response);
+        int lastPendingIndex = 0;
+        for (int i = 1; i <= indexResponses.length; i++) {
+            if (i == indexResponses.length || hasSameMappingHash(indexResponses[lastPendingIndex], indexResponses[i]) == false) {
+                final String[] subIndices;
+                if (lastPendingIndex == 0 && i == indexResponses.length) {
+                    subIndices = indices;
+                } else {
+                    subIndices = ArrayUtil.copyOfSubArray(indices, lastPendingIndex, i);
+                }
+                innerMerge(subIndices, responseMapBuilder, request, indexResponses[lastPendingIndex]);
+                lastPendingIndex = i;
+            }
         }
-        final Map<String, Map<String, FieldCapabilities>> responseMap = new HashMap<>();
+
+        Map<String, Map<String, FieldCapabilities>> responseMap = new HashMap<>();
         for (Map.Entry<String, Map<String, FieldCapabilities.Builder>> entry : responseMapBuilder.entrySet()) {
-            final Map<String, FieldCapabilities.Builder> typeMapBuilder = entry.getValue();
-            if (includeUnmapped) {
-                addUnmappedFields(indices, entry.getKey(), typeMapBuilder);
+            Map<String, FieldCapabilities.Builder> typeMapBuilder = entry.getValue();
+
+            Optional<Function<Boolean, FieldCapabilities>> unmapped = Optional.empty();
+            if (request.includeUnmapped()) {
+                // do this directly, rather than using the builder, to save creating a whole lot of objects we don't need
+                unmapped = getUnmappedFields(
+                    indexResponsesMap.keySet(),
+                    entry.getKey(),
+                    typeMapBuilder.values().stream().flatMap(FieldCapabilities.Builder::getIndices).collect(Collectors.toSet())
+                );
             }
-            boolean multiTypes = typeMapBuilder.size() > 1;
-            final Map<String, FieldCapabilities> typeMap = new HashMap<>();
-            for (Map.Entry<String, FieldCapabilities.Builder> fieldEntry : typeMapBuilder.entrySet()) {
-                typeMap.put(fieldEntry.getKey(), fieldEntry.getValue().build(multiTypes));
-            }
-            responseMap.put(entry.getKey(), Collections.unmodifiableMap(typeMap));
+
+            boolean multiTypes = typeMapBuilder.size() + unmapped.map(f -> 1).orElse(0) > 1;
+            responseMap.put(
+                entry.getKey(),
+                Collections.unmodifiableMap(
+                    Stream.concat(
+                        typeMapBuilder.entrySet()
+                            .stream()
+                            .map(e -> Map.<String, Function<Boolean, FieldCapabilities>>entry(e.getKey(), e.getValue()::build)),
+                        unmapped.stream().map(f -> Map.entry("unmapped", f))
+                    ).collect(Collectors.toMap(Map.Entry::getKey, e -> e.getValue().apply(multiTypes)))
+                )
+            );
         }
         return new FieldCapabilitiesResponse(indices, Collections.unmodifiableMap(responseMap), failures);
     }
 
-    private void addUnmappedFields(String[] indices, String field, Map<String, FieldCapabilities.Builder> typeMap) {
-        Set<String> unmappedIndices = new HashSet<>(Arrays.asList(indices));
-        typeMap.values().forEach((b) -> b.getIndices().forEach(unmappedIndices::remove));
-        if (unmappedIndices.isEmpty() == false) {
-            FieldCapabilities.Builder unmapped = new FieldCapabilities.Builder(field, "unmapped");
-            typeMap.put("unmapped", unmapped);
-            for (String index : unmappedIndices) {
-                unmapped.add(index, false, false, false, false, null, Collections.emptyMap());
-            }
+    private static Optional<Function<Boolean, FieldCapabilities>> getUnmappedFields(
+        Set<String> indices,
+        String field,
+        Set<String> mappedIndices
+    ) {
+        if (mappedIndices.size() != indices.size()) {
+            return Optional.of(
+                mt -> FieldCapabilities.buildBasic(
+                    field,
+                    "unmapped",
+                    mt ? Sets.difference(indices, mappedIndices).toArray(String[]::new) : null
+                )
+            );
         }
+        return Optional.empty();
     }
 
     private void innerMerge(
+        String[] indices,
         Map<String, Map<String, FieldCapabilities.Builder>> responseMapBuilder,
+        FieldCapabilitiesRequest request,
         FieldCapabilitiesIndexResponse response
     ) {
-        for (Map.Entry<String, IndexFieldCapabilities> entry : response.get().entrySet()) {
+        Map<String, IndexFieldCapabilities> fields = ResponseRewriter.rewriteOldResponses(
+            response.getOriginVersion(),
+            response.get(),
+            request.filters(),
+            request.types()
+        );
+        for (Map.Entry<String, IndexFieldCapabilities> entry : fields.entrySet()) {
             final String field = entry.getKey();
-            // best effort to detect metadata field coming from older nodes
-            final boolean isMetadataField = response.getOriginVersion().onOrAfter(Version.V_7_13_0)
-                ? entry.getValue().isMetadatafield()
-                : metadataFieldPred.test(field);
             final IndexFieldCapabilities fieldCap = entry.getValue();
             Map<String, FieldCapabilities.Builder> typeMap = responseMapBuilder.computeIfAbsent(field, f -> new HashMap<>());
             FieldCapabilities.Builder builder = typeMap.computeIfAbsent(
@@ -265,8 +329,8 @@ public class TransportFieldCapabilitiesAction extends HandledTransportAction<Fie
                 key -> new FieldCapabilities.Builder(field, key)
             );
             builder.add(
-                response.getIndexName(),
-                isMetadataField,
+                indices,
+                fieldCap.isMetadatafield(),
                 fieldCap.isSearchable(),
                 fieldCap.isAggregatable(),
                 fieldCap.isDimension(),
@@ -333,14 +397,17 @@ public class TransportFieldCapabilitiesAction extends HandledTransportAction<Fie
                 final Map<String, List<ShardId>> groupedShardIds = request.shardIds()
                     .stream()
                     .collect(Collectors.groupingBy(ShardId::getIndexName));
+                final FieldCapabilitiesFetcher fetcher = new FieldCapabilitiesFetcher(indicesService);
                 for (List<ShardId> shardIds : groupedShardIds.values()) {
                     final Map<ShardId, Exception> failures = new HashMap<>();
                     final Set<ShardId> unmatched = new HashSet<>();
                     for (ShardId shardId : shardIds) {
                         try {
-                            final FieldCapabilitiesIndexResponse response = fieldCapabilitiesFetcher.fetch(
+                            final FieldCapabilitiesIndexResponse response = fetcher.fetch(
                                 shardId,
                                 request.fields(),
+                                request.filters(),
+                                request.allowedTypes(),
                                 request.indexFilter(),
                                 request.nowInMillis(),
                                 request.runtimeFields()

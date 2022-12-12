@@ -100,6 +100,28 @@ public class DateProcessorTests extends ESTestCase {
         }
     }
 
+    public void testShortCircuitAdditionalPatternsAfterFirstMatchingPattern() {
+        List<String> matchFormats = new ArrayList<>();
+        matchFormats.add("invalid");
+        matchFormats.add("uuuu-dd-MM");
+        matchFormats.add("uuuu-MM-dd");
+        DateProcessor dateProcessor = new DateProcessor(
+            randomAlphaOfLength(10),
+            null,
+            templatize(ZoneId.of("Europe/Amsterdam")),
+            templatize(Locale.ENGLISH),
+            "date_as_string",
+            matchFormats,
+            "date_as_date"
+        );
+
+        Map<String, Object> document = new HashMap<>();
+        document.put("date_as_string", "2010-03-04");
+        IngestDocument ingestDocument = RandomDocumentPicks.randomIngestDocument(random(), document);
+        dateProcessor.execute(ingestDocument);
+        assertThat(ingestDocument.getFieldValue("date_as_date", String.class), equalTo("2010-04-03T00:00:00.000+02:00"));
+    }
+
     public void testJavaPatternNoTimezone() {
         DateProcessor dateProcessor = new DateProcessor(
             randomAlphaOfLength(10),
@@ -311,7 +333,7 @@ public class DateProcessorTests extends ESTestCase {
         IngestDocument ingestDocument = RandomDocumentPicks.randomIngestDocument(random(), document);
         processor.execute(ingestDocument);
         // output format is time only with nanosecond precision
-        String expectedDate = "00:00:00." + String.format(Locale.ROOT, "%09d", nanosAfterEpoch);
+        String expectedDate = "00:00:00." + formatted("%09d", nanosAfterEpoch);
         assertThat(ingestDocument.getFieldValue("date_as_date", String.class), equalTo(expectedDate));
     }
 }

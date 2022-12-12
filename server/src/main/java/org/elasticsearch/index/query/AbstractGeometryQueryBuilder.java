@@ -14,7 +14,7 @@ import org.apache.lucene.util.SetOnce;
 import org.elasticsearch.Version;
 import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.action.get.GetRequest;
-import org.elasticsearch.client.Client;
+import org.elasticsearch.client.internal.Client;
 import org.elasticsearch.common.ParsingException;
 import org.elasticsearch.common.geo.GeoJson;
 import org.elasticsearch.common.geo.GeometryIO;
@@ -354,7 +354,7 @@ public abstract class AbstractGeometryQueryBuilder<QB extends AbstractGeometryQu
      *            Name or path of the field in the Shape Document where the
      *            Shape itself is located
      */
-    private void fetch(Client client, GetRequest getRequest, String path, ActionListener<Geometry> listener) {
+    private static void fetch(Client client, GetRequest getRequest, String path, ActionListener<Geometry> listener) {
         getRequest.preference("_local");
         client.get(getRequest, listener.delegateFailure((l, response) -> {
             try {
@@ -472,16 +472,16 @@ public abstract class AbstractGeometryQueryBuilder<QB extends AbstractGeometryQu
         if (supplier != null) {
             return supplier.get() == null ? this : newShapeQueryBuilder(this.fieldName, supplier.get()).relation(relation);
         } else if (this.shape == null) {
-            SetOnce<Geometry> geometrySupplier = new SetOnce<>();
+            SetOnce<Geometry> supplier = new SetOnce<>();
             queryRewriteContext.registerAsyncAction((client, listener) -> {
                 GetRequest getRequest = new GetRequest(indexedShapeIndex, indexedShapeId);
                 getRequest.routing(indexedShapeRouting);
                 fetch(client, getRequest, indexedShapePath, ActionListener.wrap(builder -> {
-                    geometrySupplier.set(builder);
+                    supplier.set(builder);
                     listener.onResponse(null);
                 }, listener::onFailure));
             });
-            return newShapeQueryBuilder(this.fieldName, geometrySupplier::get, this.indexedShapeId).relation(relation);
+            return newShapeQueryBuilder(this.fieldName, supplier::get, this.indexedShapeId).relation(relation);
         }
         return this;
     }

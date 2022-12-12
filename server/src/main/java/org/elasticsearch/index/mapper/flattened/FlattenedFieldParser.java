@@ -128,7 +128,7 @@ class FlattenedFieldParser {
         String key = path.pathAsText(currentName);
         if (key.contains(SEPARATOR)) {
             throw new IllegalArgumentException(
-                "Keys in [flattened] fields cannot contain the reserved character \\0." + " Offending key: [" + key + "]."
+                "Keys in [flattened] fields cannot contain the reserved character \\0. Offending key: [" + key + "]."
             );
         }
         String keyedValue = createKeyedValue(key, value);
@@ -151,7 +151,7 @@ class FlattenedFieldParser {
             throw new IllegalArgumentException(msg);
         }
         BytesRef bytesValue = new BytesRef(value);
-        if (fieldType.isSearchable()) {
+        if (fieldType.isIndexed()) {
             fields.add(new StringField(rootFieldName, bytesValue, Field.Store.NO));
             fields.add(new StringField(keyedFieldName, bytesKeyedValue, Field.Store.NO));
         }
@@ -165,7 +165,7 @@ class FlattenedFieldParser {
     private void validateDepthLimit(ContentPath path) {
         if (path.length() + 1 > depthLimit) {
             throw new IllegalArgumentException(
-                "The provided [flattened] field [" + rootFieldName + "]" + " exceeds the maximum depth limit of [" + depthLimit + "]."
+                "The provided [flattened] field [" + rootFieldName + "] exceeds the maximum depth limit of [" + depthLimit + "]."
             );
         }
     }

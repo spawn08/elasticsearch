@@ -8,6 +8,7 @@
 package org.elasticsearch.action.ingest;
 
 import org.elasticsearch.ElasticsearchException;
+import org.elasticsearch.Version;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.common.io.stream.Writeable;
@@ -159,7 +160,11 @@ public class SimulateProcessorResult implements Writeable, ToXContentObject {
      * Read from a stream.
      */
     SimulateProcessorResult(StreamInput in) throws IOException {
-        this.processorTag = in.readString();
+        if (in.getVersion().onOrAfter(Version.V_8_7_0)) {
+            this.processorTag = in.readOptionalString();
+        } else {
+            this.processorTag = in.readString();
+        }
         this.ingestDocument = in.readOptionalWriteable(WriteableIngestDocument::new);
         this.failure = in.readException();
         this.description = in.readOptionalString();
@@ -174,7 +179,11 @@ public class SimulateProcessorResult implements Writeable, ToXContentObject {
 
     @Override
     public void writeTo(StreamOutput out) throws IOException {
-        out.writeString(processorTag);
+        if (out.getVersion().onOrAfter(Version.V_8_7_0)) {
+            out.writeOptionalString(processorTag);
+        } else {
+            out.writeString(processorTag);
+        }
         out.writeOptionalWriteable(ingestDocument);
         out.writeException(failure);
         out.writeOptionalString(description);
@@ -258,16 +267,16 @@ public class SimulateProcessorResult implements Writeable, ToXContentObject {
         return PARSER.apply(parser, null);
     }
 
-    Status getStatus(String typeValue) {
+    Status getStatus(String type) {
         // if no condition, or condition passed
-        if (conditionalWithResult == null || conditionalWithResult.v2()) {
+        if (conditionalWithResult == null || (conditionalWithResult != null && conditionalWithResult.v2())) {
             if (failure != null) {
                 if (ingestDocument == null) {
                     return Status.ERROR;
                 } else {
                     return Status.ERROR_IGNORED;
                 }
-            } else if (ingestDocument == null && "pipeline".equals(typeValue) == false) {
+            } else if (ingestDocument == null && "pipeline".equals(type) == false) {
                 return Status.DROPPED;
             }
             return Status.SUCCESS;

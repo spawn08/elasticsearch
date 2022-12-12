@@ -40,7 +40,6 @@ import org.junit.Before;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 
 import static java.util.Collections.emptyList;
@@ -116,7 +115,7 @@ public class SearchResponseTests extends ESTestCase {
                 numReducePhases
             );
         } else {
-            internalSearchResponse = InternalSearchResponse.empty();
+            internalSearchResponse = InternalSearchResponse.EMPTY_WITH_TOTAL_HITS;
         }
 
         return new SearchResponse(
@@ -216,7 +215,7 @@ public class SearchResponseTests extends ESTestCase {
     }
 
     public void testToXContent() throws IOException {
-        SearchHit hit = new SearchHit(1, "id1", Collections.emptyMap(), Collections.emptyMap());
+        SearchHit hit = new SearchHit(1, "id1");
         hit.score(2.0f);
         SearchHit[] hits = new SearchHit[] { hit };
         {
@@ -325,7 +324,7 @@ public class SearchResponseTests extends ESTestCase {
 
     public void testToXContentEmptyClusters() throws IOException {
         SearchResponse searchResponse = new SearchResponse(
-            InternalSearchResponse.empty(),
+            InternalSearchResponse.EMPTY_WITH_TOTAL_HITS,
             null,
             1,
             1,

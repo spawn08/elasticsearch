@@ -11,14 +11,14 @@ package org.elasticsearch.rest.action.admin.cluster;
 import org.elasticsearch.action.admin.cluster.node.stats.NodesStatsRequest;
 import org.elasticsearch.action.admin.indices.stats.CommonStatsFlags;
 import org.elasticsearch.action.admin.indices.stats.CommonStatsFlags.Flag;
-import org.elasticsearch.client.node.NodeClient;
+import org.elasticsearch.client.internal.node.NodeClient;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.logging.DeprecationLogger;
 import org.elasticsearch.core.RestApiVersion;
 import org.elasticsearch.rest.BaseRestHandler;
 import org.elasticsearch.rest.RestRequest;
-import org.elasticsearch.rest.action.RestActions.NodesResponseRestListener;
 import org.elasticsearch.rest.action.RestCancellableNodeClient;
+import org.elasticsearch.rest.action.RestChunkedToXContentListener;
 
 import java.io.IOException;
 import java.util.Collections;
@@ -33,8 +33,8 @@ import java.util.function.Consumer;
 import static org.elasticsearch.rest.RestRequest.Method.GET;
 
 public class RestNodesStatsAction extends BaseRestHandler {
-    private DeprecationLogger deprecationLogger = DeprecationLogger.getLogger(RestNodesStatsAction.class);
-    private static final String TYPES_DEPRECATION_MESSAGE = "[types removal] " + "Specifying types in nodes stats requests is deprecated.";
+    private final DeprecationLogger deprecationLogger = DeprecationLogger.getLogger(RestNodesStatsAction.class);
+    private static final String TYPES_DEPRECATION_MESSAGE = "[types removal] Specifying types in nodes stats requests is deprecated.";
 
     @Override
     public List<Route> routes() {
@@ -182,7 +182,7 @@ public class RestNodesStatsAction extends BaseRestHandler {
 
         return channel -> new RestCancellableNodeClient(client, request.getHttpChannel()).admin()
             .cluster()
-            .nodesStats(nodesStatsRequest, new NodesResponseRestListener<>(channel));
+            .nodesStats(nodesStatsRequest, new RestChunkedToXContentListener<>(channel));
     }
 
     private final Set<String> RESPONSE_PARAMS = Collections.singleton("level");

@@ -12,10 +12,9 @@ import org.apache.lucene.document.IntPoint;
 import org.apache.lucene.document.LongPoint;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.search.ConstantScoreQuery;
-import org.apache.lucene.search.DocValuesFieldExistsQuery;
+import org.apache.lucene.search.FieldExistsQuery;
 import org.apache.lucene.search.IndexOrDocValuesQuery;
 import org.apache.lucene.search.MatchNoDocsQuery;
-import org.apache.lucene.search.NormsFieldExistsQuery;
 import org.apache.lucene.search.PointRangeQuery;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.search.TermQuery;
@@ -49,13 +48,13 @@ public class RangeQueryBuilderTests extends AbstractQueryTestCase<RangeQueryBuil
         Object lower, upper;
         // switch between numeric and date ranges
         switch (randomIntBetween(0, 2)) {
-            case 0:
+            case 0 -> {
                 // use mapped integer field for numeric range queries
                 query = new RangeQueryBuilder(randomFrom(INT_FIELD_NAME, INT_RANGE_FIELD_NAME, INT_ALIAS_FIELD_NAME));
                 lower = randomIntBetween(1, 100);
                 upper = randomIntBetween(101, 200);
-                break;
-            case 1:
+            }
+            case 1 -> {
                 // use mapped date field, using date string representation
                 Instant now = Instant.now();
                 ZonedDateTime start = now.minusMillis(randomIntBetween(0, 1000000)).atZone(ZoneOffset.UTC);
@@ -74,13 +73,12 @@ public class RangeQueryBuilderTests extends AbstractQueryTestCase<RangeQueryBuil
                         query.format(format);
                     }
                 }
-                break;
-            case 2:
-            default:
+            }
+            default -> {
                 query = new RangeQueryBuilder(randomFrom(TEXT_FIELD_NAME, TEXT_ALIAS_FIELD_NAME));
                 lower = "a" + randomAlphaOfLengthBetween(1, 10);
                 upper = "z" + randomAlphaOfLengthBetween(1, 10);
-                break;
+            }
         }
 
         // Update query builder with lower bound, sometimes leaving it unset
@@ -125,17 +123,18 @@ public class RangeQueryBuilderTests extends AbstractQueryTestCase<RangeQueryBuil
             rangeQueryBuilder.to(randomIntBetween(101, 200));
         }
 
-        String query = """
-            {
-                "range":{
-                    "%s": {
-                        "include_lower":%s,
-                        "include_upper":%s,
-                        "from":%s,
-                        "to":%s
+        String query = formatted(
+            """
+                {
+                    "range":{
+                        "%s": {
+                            "include_lower":%s,
+                            "include_upper":%s,
+                            "from":%s,
+                            "to":%s
+                        }
                     }
-                }
-            }""".formatted(
+                }""",
             INT_FIELD_NAME,
             rangeQueryBuilder.includeLower(),
             rangeQueryBuilder.includeUpper(),
@@ -152,10 +151,8 @@ public class RangeQueryBuilderTests extends AbstractQueryTestCase<RangeQueryBuil
         if (queryBuilder.from() == null && queryBuilder.to() == null) {
             final Query expectedQuery;
             final MappedFieldType resolvedFieldType = context.getFieldType(queryBuilder.fieldName());
-            if (resolvedFieldType.hasDocValues()) {
-                expectedQuery = new ConstantScoreQuery(new DocValuesFieldExistsQuery(expectedFieldName));
-            } else if (context.getFieldType(resolvedFieldType.name()).getTextSearchInfo().hasNorms()) {
-                expectedQuery = new ConstantScoreQuery(new NormsFieldExistsQuery(expectedFieldName));
+            if (resolvedFieldType.hasDocValues() || context.getFieldType(resolvedFieldType.name()).getTextSearchInfo().hasNorms()) {
+                expectedQuery = new ConstantScoreQuery(new FieldExistsQuery(expectedFieldName));
             } else {
                 expectedQuery = new ConstantScoreQuery(new TermQuery(new Term(FieldNamesFieldMapper.NAME, expectedFieldName)));
             }
@@ -275,7 +272,7 @@ public class RangeQueryBuilderTests extends AbstractQueryTestCase<RangeQueryBuil
 
     public void testDateRangeQueryFormat() throws IOException {
         // We test 01/01/2012 from gte and 2030 for lt
-        String query = """
+        String query = formatted("""
             {
                 "range" : {
                     "%s" : {
@@ -284,7 +281,7 @@ public class RangeQueryBuilderTests extends AbstractQueryTestCase<RangeQueryBuil
                         "format": "dd/MM/yyyy||yyyy"
                     }
                 }
-            }""".formatted(DATE_FIELD_NAME);
+            }""", DATE_FIELD_NAME);
         Query parsedQuery = parseQuery(query).toQuery(createSearchExecutionContext());
         assertThat(parsedQuery, instanceOf(IndexOrDocValuesQuery.class));
         parsedQuery = ((IndexOrDocValuesQuery) parsedQuery).getIndexQuery();
@@ -300,7 +297,7 @@ public class RangeQueryBuilderTests extends AbstractQueryTestCase<RangeQueryBuil
         );
 
         // Test Invalid format
-        final String invalidQuery = """
+        final String invalidQuery = formatted("""
             {
                 "range" : {
                     "%s" : {
@@ -309,12 +306,12 @@ public class RangeQueryBuilderTests extends AbstractQueryTestCase<RangeQueryBuil
                         "format": "yyyy"
                     }
                 }
-            }""".formatted(DATE_FIELD_NAME);
+            }""", DATE_FIELD_NAME);
         expectThrows(ElasticsearchParseException.class, () -> parseQuery(invalidQuery).toQuery(createSearchExecutionContext()));
     }
 
     public void testDateRangeBoundaries() throws IOException {
-        String query = """
+        String query = formatted("""
             {
                 "range" : {
                     "%s" : {
@@ -323,7 +320,7 @@ public class RangeQueryBuilderTests extends AbstractQueryTestCase<RangeQueryBuil
                     }
                 }
             }
-            """.formatted(DATE_FIELD_NAME);
+            """, DATE_FIELD_NAME);
         Query parsedQuery = parseQuery(query).toQuery(createSearchExecutionContext());
         assertThat(parsedQuery, instanceOf(IndexOrDocValuesQuery.class));
         parsedQuery = ((IndexOrDocValuesQuery) parsedQuery).getIndexQuery();
@@ -337,7 +334,7 @@ public class RangeQueryBuilderTests extends AbstractQueryTestCase<RangeQueryBuil
             parsedQuery
         );
 
-        query = """
+        query = formatted("""
             {
                 "range" : {
                     "%s" : {
@@ -345,7 +342,7 @@ public class RangeQueryBuilderTests extends AbstractQueryTestCase<RangeQueryBuil
                         "lt": "2014-12-08||/d"
                     }
                 }
-            }""".formatted(DATE_FIELD_NAME);
+            }""", DATE_FIELD_NAME);
         parsedQuery = parseQuery(query).toQuery(createSearchExecutionContext());
         assertThat(parsedQuery, instanceOf(IndexOrDocValuesQuery.class));
         parsedQuery = ((IndexOrDocValuesQuery) parsedQuery).getIndexQuery();
@@ -361,7 +358,7 @@ public class RangeQueryBuilderTests extends AbstractQueryTestCase<RangeQueryBuil
     }
 
     public void testDateRangeQueryTimezone() throws IOException {
-        String query = """
+        String query = formatted("""
             {
                 "range" : {
                     "%s" : {
@@ -370,7 +367,7 @@ public class RangeQueryBuilderTests extends AbstractQueryTestCase<RangeQueryBuil
                         "time_zone": "+01:00"
                     }
                 }
-            }""".formatted(DATE_FIELD_NAME);
+            }""", DATE_FIELD_NAME);
         SearchExecutionContext context = createSearchExecutionContext();
         Query parsedQuery = parseQuery(query).toQuery(context);
         assertThat(parsedQuery, instanceOf(DateRangeIncludingNowQuery.class));
@@ -380,7 +377,7 @@ public class RangeQueryBuilderTests extends AbstractQueryTestCase<RangeQueryBuil
         assertThat(parsedQuery, instanceOf(PointRangeQuery.class));
         // TODO what else can we assert
 
-        query = """
+        query = formatted("""
             {
                 "range" : {
                     "%s" : {
@@ -389,7 +386,7 @@ public class RangeQueryBuilderTests extends AbstractQueryTestCase<RangeQueryBuil
                         "time_zone": "-01:00"
                     }
                 }
-            }""".formatted(INT_FIELD_NAME);
+            }""", INT_FIELD_NAME);
         QueryBuilder queryBuilder = parseQuery(query);
         queryBuilder.toQuery(createSearchExecutionContext()); // no exception
     }
@@ -453,7 +450,7 @@ public class RangeQueryBuilderTests extends AbstractQueryTestCase<RangeQueryBuil
         Query luceneQuery = rewrittenRange.toQuery(searchExecutionContext);
         final Query expectedQuery;
         if (searchExecutionContext.getFieldType(query.fieldName()).hasDocValues()) {
-            expectedQuery = new ConstantScoreQuery(new DocValuesFieldExistsQuery(query.fieldName()));
+            expectedQuery = new ConstantScoreQuery(new FieldExistsQuery(query.fieldName()));
         } else {
             expectedQuery = new ConstantScoreQuery(new TermQuery(new Term(FieldNamesFieldMapper.NAME, query.fieldName())));
         }
@@ -555,7 +552,7 @@ public class RangeQueryBuilderTests extends AbstractQueryTestCase<RangeQueryBuil
     }
 
     public void testParseFailsWithMultipleFieldsWhenOneIsDate() {
-        String json = """
+        String json = formatted("""
             {
               "range": {
                 "age": {
@@ -566,7 +563,7 @@ public class RangeQueryBuilderTests extends AbstractQueryTestCase<RangeQueryBuil
                   "gte": "2016-09-13 05:01:14"
                 }
               }
-            }""".formatted(DATE_FIELD_NAME);
+            }""", DATE_FIELD_NAME);
         ParsingException e = expectThrows(ParsingException.class, () -> parseQuery(json));
         assertEquals("[range] query doesn't support multiple fields, found [age] and [" + DATE_FIELD_NAME + "]", e.getMessage());
     }

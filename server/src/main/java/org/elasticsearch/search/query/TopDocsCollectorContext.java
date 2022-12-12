@@ -8,6 +8,7 @@
 
 package org.elasticsearch.search.query;
 
+import org.apache.lucene.index.DocValuesType;
 import org.apache.lucene.index.FieldInfo;
 import org.apache.lucene.index.FieldInfos;
 import org.apache.lucene.index.IndexOptions;
@@ -21,8 +22,8 @@ import org.apache.lucene.search.BooleanClause;
 import org.apache.lucene.search.BoostQuery;
 import org.apache.lucene.search.Collector;
 import org.apache.lucene.search.ConstantScoreQuery;
-import org.apache.lucene.search.DocValuesFieldExistsQuery;
 import org.apache.lucene.search.FieldDoc;
+import org.apache.lucene.search.FieldExistsQuery;
 import org.apache.lucene.search.MatchAllDocsQuery;
 import org.apache.lucene.search.MultiCollector;
 import org.apache.lucene.search.Query;
@@ -305,8 +306,7 @@ abstract class TopDocsCollectorContext extends QueryCollectorContext {
             TopDocs in = topDocsSupplier.get();
             float maxScore = maxScoreSupplier.get();
             final TopDocs newTopDocs;
-            if (in instanceof TopFieldDocs) {
-                TopFieldDocs fieldDocs = (TopFieldDocs) in;
+            if (in instanceof TopFieldDocs fieldDocs) {
                 newTopDocs = new TopFieldDocs(totalHitsSupplier.get(), fieldDocs.scoreDocs, fieldDocs.fields);
             } else {
                 newTopDocs = new TopDocs(totalHitsSupplier.get(), in.scoreDocs);
@@ -402,13 +402,17 @@ abstract class TopDocsCollectorContext extends QueryCollectorContext {
                 count += context.reader().docFreq(term);
             }
             return count;
-        } else if (query.getClass() == DocValuesFieldExistsQuery.class && reader.hasDeletions() == false) {
-            final String field = ((DocValuesFieldExistsQuery) query).getField();
+        } else if (query.getClass() == FieldExistsQuery.class && reader.hasDeletions() == false) {
+            final String field = ((FieldExistsQuery) query).getField();
             int count = 0;
             for (LeafReaderContext context : reader.leaves()) {
                 FieldInfos fieldInfos = context.reader().getFieldInfos();
                 FieldInfo fieldInfo = fieldInfos.fieldInfo(field);
                 if (fieldInfo != null) {
+                    if (fieldInfo.getDocValuesType() == DocValuesType.NONE) {
+                        // no shortcut possible: it's a text field, empty values are counted as no value.
+                        return -1;
+                    }
                     if (fieldInfo.getPointIndexDimensionCount() > 0) {
                         PointValues points = context.reader().getPointValues(field);
                         if (points != null) {
@@ -537,8 +541,7 @@ abstract class TopDocsCollectorContext extends QueryCollectorContext {
         void checkMaxScoreInfo(Query query) {
             if (query instanceof FunctionScoreQuery || query instanceof ScriptScoreQuery || query instanceof SpanQuery) {
                 hasInfMaxScore = true;
-            } else if (query instanceof ESToParentBlockJoinQuery) {
-                ESToParentBlockJoinQuery q = (ESToParentBlockJoinQuery) query;
+            } else if (query instanceof ESToParentBlockJoinQuery q) {
                 hasInfMaxScore |= (q.getScoreMode() != org.apache.lucene.search.join.ScoreMode.None);
             }
         }

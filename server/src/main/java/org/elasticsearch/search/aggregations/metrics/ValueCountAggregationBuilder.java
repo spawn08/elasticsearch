@@ -16,7 +16,6 @@ import org.elasticsearch.search.aggregations.AggregatorFactories;
 import org.elasticsearch.search.aggregations.AggregatorFactory;
 import org.elasticsearch.search.aggregations.support.AggregationContext;
 import org.elasticsearch.search.aggregations.support.CoreValuesSourceType;
-import org.elasticsearch.search.aggregations.support.ValuesSource;
 import org.elasticsearch.search.aggregations.support.ValuesSourceAggregationBuilder;
 import org.elasticsearch.search.aggregations.support.ValuesSourceConfig;
 import org.elasticsearch.search.aggregations.support.ValuesSourceRegistry;
@@ -28,7 +27,6 @@ import java.io.IOException;
 import java.util.Map;
 
 public class ValueCountAggregationBuilder extends ValuesSourceAggregationBuilder.SingleMetricAggregationBuilder<
-    ValuesSource,
     ValueCountAggregationBuilder> {
     public static final String NAME = "value_count";
     public static final ValuesSourceRegistry.RegistryKey<MetricAggregatorSupplier> REGISTRY_KEY = new ValuesSourceRegistry.RegistryKey<>(
@@ -68,6 +66,11 @@ public class ValueCountAggregationBuilder extends ValuesSourceAggregationBuilder
     @Override
     protected AggregationBuilder shallowCopy(AggregatorFactories.Builder factoriesBuilder, Map<String, Object> metadata) {
         return new ValueCountAggregationBuilder(this, factoriesBuilder, metadata);
+    }
+
+    @Override
+    public boolean supportsSampling() {
+        return true;
     }
 
     /**
@@ -111,5 +114,10 @@ public class ValueCountAggregationBuilder extends ValuesSourceAggregationBuilder
     @Override
     protected ValuesSourceRegistry.RegistryKey<?> getRegistryKey() {
         return REGISTRY_KEY;
+    }
+
+    @Override
+    public Version getMinimalSupportedVersion() {
+        return Version.V_EMPTY;
     }
 }

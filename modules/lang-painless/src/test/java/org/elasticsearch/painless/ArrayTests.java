@@ -8,8 +8,6 @@
 
 package org.elasticsearch.painless;
 
-import org.apache.lucene.util.Constants;
-import org.elasticsearch.jdk.JavaVersion;
 import org.hamcrest.Matcher;
 
 import java.lang.invoke.MethodHandle;
@@ -31,15 +29,10 @@ public class ArrayTests extends ArrayLikeObjectTestCase {
 
     @Override
     protected Matcher<String> outOfBoundsExceptionMessageMatcher(int index, int size) {
-        if (JavaVersion.current().compareTo(JavaVersion.parse("11")) < 0) {
-            return equalTo(Integer.toString(index));
-        } else {
-            return equalTo("Index " + Integer.toString(index) + " out of bounds for length " + Integer.toString(size));
-        }
+        return equalTo("Index " + Integer.toString(index) + " out of bounds for length " + Integer.toString(size));
     }
 
     public void testArrayLengthHelper() throws Throwable {
-        assertEquals(Constants.JRE_IS_MINIMUM_JAVA9, Def.JAVA9_ARRAY_LENGTH_MH_FACTORY != null);
         assertArrayLength(2, new int[2]);
         assertArrayLength(3, new long[3]);
         assertArrayLength(4, new byte[4]);

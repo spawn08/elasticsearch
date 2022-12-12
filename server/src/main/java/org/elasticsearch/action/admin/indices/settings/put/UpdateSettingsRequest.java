@@ -31,7 +31,6 @@ import java.util.Objects;
 
 import static org.elasticsearch.action.ValidateActions.addValidationError;
 import static org.elasticsearch.common.settings.Settings.readSettingsFromStream;
-import static org.elasticsearch.common.settings.Settings.writeSettingsToStream;
 
 /**
  * Request for an update index settings action
@@ -182,7 +181,7 @@ public class UpdateSettingsRequest extends AcknowledgedRequest<UpdateSettingsReq
         super.writeTo(out);
         out.writeStringArrayNullable(indices);
         indicesOptions.writeIndicesOptions(out);
-        writeSettingsToStream(settings, out);
+        settings.writeTo(out);
         out.writeBoolean(preserveExisting);
         if (out.getVersion().onOrAfter(Version.V_7_12_0)) {
             out.writeString(origin);
@@ -198,19 +197,19 @@ public class UpdateSettingsRequest extends AcknowledgedRequest<UpdateSettingsReq
     }
 
     public UpdateSettingsRequest fromXContent(XContentParser parser) throws IOException {
-        Map<String, Object> settingsMaps = new HashMap<>();
-        Map<String, Object> bodySettingsMap = parser.map();
-        Object innerBodySettings = bodySettingsMap.get("settings");
+        Map<String, Object> settings = new HashMap<>();
+        Map<String, Object> bodySettings = parser.map();
+        Object innerBodySettings = bodySettings.get("settings");
         // clean up in case the body is wrapped with "settings" : { ... }
         if (innerBodySettings instanceof Map) {
             @SuppressWarnings("unchecked")
             Map<String, Object> innerBodySettingsMap = (Map<String, Object>) innerBodySettings;
-            settingsMaps.putAll(innerBodySettingsMap);
-            checkMixedRequest(bodySettingsMap);
+            settings.putAll(innerBodySettingsMap);
+            checkMixedRequest(bodySettings);
         } else {
-            settingsMaps.putAll(bodySettingsMap);
+            settings.putAll(bodySettings);
         }
-        return this.settings(settingsMaps);
+        return this.settings(settings);
     }
 
     /**

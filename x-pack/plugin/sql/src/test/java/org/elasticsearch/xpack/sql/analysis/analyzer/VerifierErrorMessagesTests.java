@@ -358,6 +358,23 @@ public class VerifierErrorMessagesTests extends ESTestCase {
         );
     }
 
+    public void testDateFormatValidArgs() {
+        accept("SELECT DATE_FORMAT(date, '%H:%i:%s.%f') FROM test");
+        accept("SELECT DATE_FORMAT(date::date, '%m/%d/%Y') FROM test");
+        accept("SELECT DATE_FORMAT(date::time, '%H:%i:%s') FROM test");
+    }
+
+    public void testDateFormatInvalidArgs() {
+        assertEquals(
+            "1:8: first argument of [DATE_FORMAT(int, keyword)] must be [date, time or datetime], found value [int] type [integer]",
+            error("SELECT DATE_FORMAT(int, keyword) FROM test")
+        );
+        assertEquals(
+            "1:8: second argument of [DATE_FORMAT(date, int)] must be [string], found value [int] type [integer]",
+            error("SELECT DATE_FORMAT(date, int) FROM test")
+        );
+    }
+
     public void testDatePartInvalidArgs() {
         assertEquals(
             "1:8: first argument of [DATE_PART(int, date)] must be [string], found value [int] type [integer]",
@@ -1457,6 +1474,20 @@ public class VerifierErrorMessagesTests extends ESTestCase {
         );
     }
 
+    public void testMinOnUnsignedLongGroupByHavingUnsupported() {
+        assertEquals(
+            "1:62: HAVING filter is unsupported for function [MIN(unsigned_long)]",
+            error("SELECT MIN(unsigned_long) min FROM test GROUP BY text HAVING min > 10")
+        );
+    }
+
+    public void testMaxOnUnsignedLongGroupByHavingUnsupported() {
+        assertEquals(
+            "1:62: HAVING filter is unsupported for function [MAX(unsigned_long)]",
+            error("SELECT MAX(unsigned_long) max FROM test GROUP BY text HAVING max > 10")
+        );
+    }
+
     public void testProjectAliasInFilter() {
         accept("SELECT int AS i FROM test WHERE i > 10");
     }
@@ -1725,6 +1756,11 @@ public class VerifierErrorMessagesTests extends ESTestCase {
         checkMsg.accept("SELECT c FROM (SELECT SUM(int) c FROM test) GROUP BY c HAVING COUNT(*) > 10");
         checkMsg.accept("SELECT COUNT(*) FROM (SELECT int i FROM test GROUP BY i)");
         checkMsg.accept("SELECT a.i, COUNT(a.c) FROM (SELECT int i, COUNT(int) c FROM test GROUP BY int) a GROUP BY c");
+        // directly related to https://github.com/elastic/elasticsearch/issues/81577
+        // before the fix, this query was throwing a StackOverflowError
+        checkMsg.accept(
+            "SELECT MAX(int) AS int, AVG(int) AS int, AVG(int) AS s FROM (SELECT MAX(int) AS int FROM test GROUP BY int) WHERE s > 0 "
+        );
     }
 
     private String randomTopHitsFunction() {

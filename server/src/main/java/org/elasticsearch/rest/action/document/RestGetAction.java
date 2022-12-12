@@ -10,7 +10,7 @@ package org.elasticsearch.rest.action.document;
 
 import org.elasticsearch.action.get.GetRequest;
 import org.elasticsearch.action.get.GetResponse;
-import org.elasticsearch.client.node.NodeClient;
+import org.elasticsearch.client.internal.node.NodeClient;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.core.RestApiVersion;
 import org.elasticsearch.index.VersionType;
@@ -78,6 +78,9 @@ public class RestGetAction extends BaseRestHandler {
         getRequest.versionType(VersionType.fromString(request.param("version_type"), getRequest.versionType()));
 
         getRequest.fetchSourceContext(FetchSourceContext.parseFromRestRequest(request));
+        if (request.paramAsBoolean("force_synthetic_source", false)) {
+            getRequest.setForceSyntheticSource(true);
+        }
 
         return channel -> client.get(getRequest, new RestToXContentListener<GetResponse>(channel) {
             @Override

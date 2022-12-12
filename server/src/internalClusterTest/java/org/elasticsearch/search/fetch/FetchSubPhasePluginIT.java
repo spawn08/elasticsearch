@@ -38,7 +38,7 @@ import java.util.Map;
 import java.util.Objects;
 
 import static java.util.Collections.singletonList;
-import static org.elasticsearch.client.Requests.indexRequest;
+import static org.elasticsearch.client.internal.Requests.indexRequest;
 import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertSearchResponse;
 import static org.elasticsearch.xcontent.XContentFactory.jsonBuilder;
 import static org.hamcrest.CoreMatchers.equalTo;
@@ -115,6 +115,11 @@ public class FetchSubPhasePluginIT extends ESIntegTestCase {
                 @Override
                 public void setNextReader(LeafReaderContext readerContext) {
 
+                }
+
+                @Override
+                public StoredFieldsSpec storedFieldsSpec() {
+                    return StoredFieldsSpec.NO_REQUIREMENTS;
                 }
 
                 @Override

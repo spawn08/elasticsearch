@@ -9,7 +9,6 @@
 package org.elasticsearch.action.search;
 
 import org.apache.logging.log4j.Logger;
-import org.apache.logging.log4j.message.ParameterizedMessage;
 import org.apache.lucene.util.CollectionUtil;
 import org.apache.lucene.util.FixedBitSet;
 import org.elasticsearch.Version;
@@ -50,6 +49,7 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
+import static org.elasticsearch.core.Strings.format;
 import static org.elasticsearch.core.Types.forciblyCast;
 
 /**
@@ -129,9 +129,7 @@ final class CanMatchPreFilterSearchPhase extends SearchPhase {
     }
 
     private static boolean assertSearchCoordinationThread() {
-        assert Thread.currentThread().getName().contains(ThreadPool.Names.SEARCH_COORDINATION)
-            : "not called from the right thread " + Thread.currentThread().getName();
-        return true;
+        return ThreadPool.assertCurrentThreadPool(ThreadPool.Names.SEARCH_COORDINATION);
     }
 
     @Override
@@ -162,19 +160,17 @@ final class CanMatchPreFilterSearchPhase extends SearchPhase {
                 searchShardIterator.getOriginalIndices().indicesOptions(),
                 Collections.emptyList(),
                 getNumShards(),
-                timeProvider.getAbsoluteStartMillis(),
+                timeProvider.absoluteStartMillis(),
                 searchShardIterator.getClusterAlias()
             );
-            final ShardSearchRequest shardSearchRequest = canMatchNodeRequest.createShardSearchRequest(
-                buildShardLevelRequest(searchShardIterator)
-            );
+            final ShardSearchRequest request = canMatchNodeRequest.createShardSearchRequest(buildShardLevelRequest(searchShardIterator));
             boolean canMatch = true;
             CoordinatorRewriteContext coordinatorRewriteContext = coordinatorRewriteContextProvider.getCoordinatorRewriteContext(
-                shardSearchRequest.shardId().getIndex()
+                request.shardId().getIndex()
             );
             if (coordinatorRewriteContext != null) {
                 try {
-                    canMatch = SearchService.queryStillMatchesAfterRewrite(shardSearchRequest, coordinatorRewriteContext);
+                    canMatch = SearchService.queryStillMatchesAfterRewrite(request, coordinatorRewriteContext);
                 } catch (Exception e) {
                     // treat as if shard is still a potential match
                 }
@@ -183,7 +179,7 @@ final class CanMatchPreFilterSearchPhase extends SearchPhase {
                 matchedShardLevelRequests.add(searchShardIterator);
             } else {
                 CanMatchShardResponse result = new CanMatchShardResponse(canMatch, null);
-                result.setShardIndex(shardSearchRequest.shardRequestIndex());
+                result.setShardIndex(request.shardRequestIndex());
                 results.consumeResult(result, () -> {});
             }
         }
@@ -346,36 +342,13 @@ final class CanMatchPreFilterSearchPhase extends SearchPhase {
         @Override
         public void onFailure(Exception e) {
             if (logger.isDebugEnabled()) {
-                logger.debug(new ParameterizedMessage("Failed to execute [{}] while running [{}] phase", request, getName()), e);
+                logger.debug(() -> format("Failed to execute [%s] while running [%s] phase", request, getName()), e);
             }
             onPhaseFailure("round", e);
         }
     }
 
-    private static class SendingTarget {
-        @Nullable
-        private final String clusterAlias;
-        @Nullable
-        private final String nodeId;
-
-        SendingTarget(@Nullable String clusterAlias, @Nullable String nodeId) {
-            this.clusterAlias = clusterAlias;
-            this.nodeId = nodeId;
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) return true;
-            if (o == null || getClass() != o.getClass()) return false;
-            SendingTarget that = (SendingTarget) o;
-            return Objects.equals(clusterAlias, that.clusterAlias) && Objects.equals(nodeId, that.nodeId);
-        }
-
-        @Override
-        public int hashCode() {
-            return Objects.hash(clusterAlias, nodeId);
-        }
-    }
+    private record SendingTarget(@Nullable String clusterAlias, @Nullable String nodeId) {}
 
     private CanMatchNodeRequest createCanMatchRequest(Map.Entry<SendingTarget, List<SearchShardIterator>> entry) {
         final SearchShardIterator first = entry.getValue().get(0);
@@ -393,17 +366,17 @@ final class CanMatchPreFilterSearchPhase extends SearchPhase {
             first.getOriginalIndices().indicesOptions(),
             shardLevelRequests,
             getNumShards(),
-            timeProvider.getAbsoluteStartMillis(),
+            timeProvider.absoluteStartMillis(),
             first.getClusterAlias()
         );
     }
 
     private void finishPhase() {
         try {
-            phaseFactory.apply(getIterator()).start();
+            phaseFactory.apply(getIterator(results, shardsIts)).start();
         } catch (Exception e) {
             if (logger.isDebugEnabled()) {
-                logger.debug(new ParameterizedMessage("Failed to execute [{}] while running [{}] phase", request, getName()), e);
+                logger.debug(() -> format("Failed to execute [%s] while running [%s] phase", request, getName()), e);
             }
             onPhaseFailure("finish", e);
         }
@@ -428,8 +401,8 @@ final class CanMatchPreFilterSearchPhase extends SearchPhase {
         );
     }
 
-    private boolean checkMinimumVersion(GroupShardsIterator<SearchShardIterator> shardIterators) {
-        for (SearchShardIterator it : shardIterators) {
+    private boolean checkMinimumVersion(GroupShardsIterator<SearchShardIterator> shardsIts) {
+        for (SearchShardIterator it : shardsIts) {
             if (it.getTargetNodeIds().isEmpty() == false) {
                 boolean isCompatible = it.getTargetNodeIds().stream().anyMatch(nodeId -> {
                     Transport.Connection conn = getConnection(new SendingTarget(it.getClusterAlias(), nodeId));
@@ -455,7 +428,7 @@ final class CanMatchPreFilterSearchPhase extends SearchPhase {
             boolean withTotalHits = trackTotalHitsUpTo != SearchContext.TRACK_TOTAL_HITS_DISABLED;
             listener.onResponse(
                 new SearchResponse(
-                    InternalSearchResponse.empty(withTotalHits),
+                    withTotalHits ? InternalSearchResponse.EMPTY_WITH_TOTAL_HITS : InternalSearchResponse.EMPTY_WITHOUT_TOTAL_HITS,
                     null,
                     0,
                     0,
@@ -474,7 +447,7 @@ final class CanMatchPreFilterSearchPhase extends SearchPhase {
             @Override
             public void onFailure(Exception e) {
                 if (logger.isDebugEnabled()) {
-                    logger.debug(new ParameterizedMessage("Failed to execute [{}] while running [{}] phase", request, getName()), e);
+                    logger.debug(() -> format("Failed to execute [%s] while running [%s] phase", request, getName()), e);
                 }
                 onPhaseFailure("start", e);
             }
@@ -556,7 +529,10 @@ final class CanMatchPreFilterSearchPhase extends SearchPhase {
         }
     }
 
-    private GroupShardsIterator<SearchShardIterator> getIterator() {
+    private GroupShardsIterator<SearchShardIterator> getIterator(
+        CanMatchSearchPhaseResults results,
+        GroupShardsIterator<SearchShardIterator> shardsIts
+    ) {
         int cardinality = results.getNumPossibleMatches();
         FixedBitSet possibleMatches = results.getPossibleMatches();
         if (cardinality == 0) {
@@ -599,7 +575,7 @@ final class CanMatchPreFilterSearchPhase extends SearchPhase {
             .boxed()
             .sorted(shardComparator(shardsIts, minAndMaxes, order))
             .map(shardsIts::get)
-            .collect(Collectors.toList());
+            .toList();
     }
 
     private static boolean shouldSortShards(MinAndMax<?>[] minAndMaxes) {

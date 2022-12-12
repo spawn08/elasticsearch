@@ -10,7 +10,6 @@ package org.elasticsearch.cluster;
 import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.apache.logging.log4j.message.ParameterizedMessage;
 import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.action.support.GroupedActionListener;
 import org.elasticsearch.cluster.coordination.FollowersChecker;
@@ -40,6 +39,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.elasticsearch.common.settings.Setting.Property;
 import static org.elasticsearch.common.settings.Setting.positiveTimeSetting;
+import static org.elasticsearch.core.Strings.format;
 
 /**
  * This component is responsible for maintaining connections from this node to all the nodes listed in the cluster state, and for
@@ -98,8 +98,8 @@ public class NodeConnectionsService extends AbstractLifecycleComponent {
         }
 
         final GroupedActionListener<Void> listener = new GroupedActionListener<>(
-            ActionListener.wrap(onCompletion),
-            discoveryNodes.getSize()
+            discoveryNodes.getSize(),
+            ActionListener.wrap(onCompletion)
         );
 
         final List<Runnable> runnables = new ArrayList<>(discoveryNodes.getSize());
@@ -160,8 +160,8 @@ public class NodeConnectionsService extends AbstractLifecycleComponent {
             } else {
                 logger.trace("ensureConnections: {}", targetsByNode);
                 final GroupedActionListener<Void> listener = new GroupedActionListener<>(
-                    ActionListener.wrap(onCompletion),
-                    connectionTargets.size()
+                    connectionTargets.size(),
+                    ActionListener.wrap(onCompletion)
                 );
                 for (final ConnectionTarget connectionTarget : connectionTargets) {
                     runnables.add(connectionTarget.connect(listener));
@@ -276,7 +276,7 @@ public class NodeConnectionsService extends AbstractLifecycleComponent {
                         final Level level = currentFailureCount % 6 == 1 ? Level.WARN : Level.DEBUG;
                         logger.log(
                             level,
-                            new ParameterizedMessage("failed to connect to {} (tried [{}] times)", discoveryNode, currentFailureCount),
+                            () -> format("failed to connect to %s (tried [%s] times)", discoveryNode, currentFailureCount),
                             e
                         );
                         setConnectionRef(null);

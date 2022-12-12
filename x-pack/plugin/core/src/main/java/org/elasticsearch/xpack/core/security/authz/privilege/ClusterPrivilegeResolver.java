@@ -15,27 +15,43 @@ import org.elasticsearch.action.admin.cluster.snapshots.create.CreateSnapshotAct
 import org.elasticsearch.action.admin.cluster.snapshots.get.GetSnapshotsAction;
 import org.elasticsearch.action.admin.cluster.snapshots.status.SnapshotsStatusAction;
 import org.elasticsearch.action.admin.cluster.state.ClusterStateAction;
+import org.elasticsearch.action.admin.indices.template.get.GetComponentTemplateAction;
+import org.elasticsearch.action.admin.indices.template.get.GetComposableIndexTemplateAction;
+import org.elasticsearch.action.admin.indices.template.get.GetIndexTemplatesAction;
 import org.elasticsearch.action.ingest.GetPipelineAction;
 import org.elasticsearch.action.ingest.SimulatePipelineAction;
 import org.elasticsearch.common.Strings;
+import org.elasticsearch.common.util.Maps;
 import org.elasticsearch.transport.TransportRequest;
 import org.elasticsearch.xpack.core.ilm.action.GetLifecycleAction;
 import org.elasticsearch.xpack.core.ilm.action.GetStatusAction;
 import org.elasticsearch.xpack.core.ilm.action.StartILMAction;
 import org.elasticsearch.xpack.core.ilm.action.StopILMAction;
 import org.elasticsearch.xpack.core.security.action.DelegatePkiAuthenticationAction;
-import org.elasticsearch.xpack.core.security.action.GrantApiKeyAction;
+import org.elasticsearch.xpack.core.security.action.apikey.GetApiKeyAction;
+import org.elasticsearch.xpack.core.security.action.apikey.GrantApiKeyAction;
+import org.elasticsearch.xpack.core.security.action.apikey.QueryApiKeyAction;
+import org.elasticsearch.xpack.core.security.action.privilege.GetBuiltinPrivilegesAction;
+import org.elasticsearch.xpack.core.security.action.privilege.GetPrivilegesAction;
+import org.elasticsearch.xpack.core.security.action.profile.GetProfilesAction;
+import org.elasticsearch.xpack.core.security.action.profile.SuggestProfilesAction;
+import org.elasticsearch.xpack.core.security.action.role.GetRolesAction;
+import org.elasticsearch.xpack.core.security.action.rolemapping.GetRoleMappingsAction;
 import org.elasticsearch.xpack.core.security.action.saml.SamlSpMetadataAction;
+import org.elasticsearch.xpack.core.security.action.service.GetServiceAccountAction;
+import org.elasticsearch.xpack.core.security.action.service.GetServiceAccountCredentialsAction;
 import org.elasticsearch.xpack.core.security.action.token.InvalidateTokenAction;
 import org.elasticsearch.xpack.core.security.action.token.RefreshTokenAction;
+import org.elasticsearch.xpack.core.security.action.user.GetUserPrivilegesAction;
+import org.elasticsearch.xpack.core.security.action.user.GetUsersAction;
 import org.elasticsearch.xpack.core.security.action.user.HasPrivilegesAction;
+import org.elasticsearch.xpack.core.security.action.user.ProfileHasPrivilegesAction;
 import org.elasticsearch.xpack.core.security.authc.Authentication;
 import org.elasticsearch.xpack.core.slm.action.GetSnapshotLifecycleAction;
 
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -43,7 +59,6 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.SortedMap;
 import java.util.TreeMap;
-import java.util.stream.Collectors;
 
 /**
  * Translates cluster privilege names into concrete implementations
@@ -63,8 +78,14 @@ public class ClusterPrivilegeResolver {
     private static final Set<String> MANAGE_TOKEN_PATTERN = Set.of("cluster:admin/xpack/security/token/*");
     private static final Set<String> MANAGE_API_KEY_PATTERN = Set.of("cluster:admin/xpack/security/api_key/*");
     private static final Set<String> MANAGE_SERVICE_ACCOUNT_PATTERN = Set.of("cluster:admin/xpack/security/service_account/*");
+    private static final Set<String> MANAGE_USER_PROFILE_PATTERN = Set.of("cluster:admin/xpack/security/profile/*");
     private static final Set<String> GRANT_API_KEY_PATTERN = Set.of(GrantApiKeyAction.NAME + "*");
-    private static final Set<String> MONITOR_PATTERN = Set.of("cluster:monitor/*");
+    private static final Set<String> MONITOR_PATTERN = Set.of(
+        "cluster:monitor/*",
+        GetIndexTemplatesAction.NAME,
+        GetComponentTemplateAction.NAME,
+        GetComposableIndexTemplateAction.NAME
+    );
     private static final Set<String> MONITOR_ML_PATTERN = Set.of("cluster:monitor/xpack/ml/*");
     private static final Set<String> MONITOR_TEXT_STRUCTURE_PATTERN = Set.of("cluster:monitor/text_structure/*");
     private static final Set<String> MONITOR_TRANSFORM_PATTERN = Set.of("cluster:monitor/data_frame/*", "cluster:monitor/transform/*");
@@ -166,12 +187,35 @@ public class ClusterPrivilegeResolver {
         ALL_SECURITY_PATTERN,
         Set.of(DelegatePkiAuthenticationAction.NAME)
     );
+    public static final NamedClusterPrivilege READ_SECURITY = new ActionClusterPrivilege(
+        "read_security",
+        Set.of(
+            GetApiKeyAction.NAME,
+            QueryApiKeyAction.NAME,
+            GetBuiltinPrivilegesAction.NAME,
+            GetPrivilegesAction.NAME,
+            GetProfilesAction.NAME,
+            ProfileHasPrivilegesAction.NAME,
+            SuggestProfilesAction.NAME,
+            GetRolesAction.NAME,
+            GetRoleMappingsAction.NAME,
+            GetServiceAccountAction.NAME,
+            GetServiceAccountCredentialsAction.NAME + "*",
+            GetUsersAction.NAME,
+            GetUserPrivilegesAction.NAME, // normally authorized under the "same-user" authz check, but added here for uniformity
+            HasPrivilegesAction.NAME
+        )
+    );
     public static final NamedClusterPrivilege MANAGE_SAML = new ActionClusterPrivilege("manage_saml", MANAGE_SAML_PATTERN);
     public static final NamedClusterPrivilege MANAGE_OIDC = new ActionClusterPrivilege("manage_oidc", MANAGE_OIDC_PATTERN);
     public static final NamedClusterPrivilege MANAGE_API_KEY = new ActionClusterPrivilege("manage_api_key", MANAGE_API_KEY_PATTERN);
     public static final NamedClusterPrivilege MANAGE_SERVICE_ACCOUNT = new ActionClusterPrivilege(
         "manage_service_account",
         MANAGE_SERVICE_ACCOUNT_PATTERN
+    );
+    public static final NamedClusterPrivilege MANAGE_USER_PROFILE = new ActionClusterPrivilege(
+        "manage_user_profile",
+        MANAGE_USER_PROFILE_PATTERN
     );
     public static final NamedClusterPrivilege GRANT_API_KEY = new ActionClusterPrivilege("grant_api_key", GRANT_API_KEY_PATTERN);
     public static final NamedClusterPrivilege MANAGE_PIPELINE = new ActionClusterPrivilege(
@@ -227,11 +271,13 @@ public class ClusterPrivilegeResolver {
             READ_PIPELINE,
             TRANSPORT_CLIENT,
             MANAGE_SECURITY,
+            READ_SECURITY,
             MANAGE_SAML,
             MANAGE_OIDC,
             MANAGE_API_KEY,
             GRANT_API_KEY,
             MANAGE_SERVICE_ACCOUNT,
+            MANAGE_USER_PROFILE,
             MANAGE_PIPELINE,
             MANAGE_ROLLUP,
             MANAGE_AUTOSCALING,
@@ -305,7 +351,7 @@ public class ClusterPrivilegeResolver {
             .stream()
             .filter(e -> e.getValue().permission().check(action, request, authentication))
             .map(Map.Entry::getKey)
-            .collect(Collectors.toUnmodifiableList());
+            .toList();
     }
 
     /**
@@ -314,7 +360,7 @@ public class ClusterPrivilegeResolver {
      */
     static SortedMap<String, NamedClusterPrivilege> sortByAccessLevel(Collection<NamedClusterPrivilege> privileges) {
         // How many other privileges does this privilege imply. Those with a higher count are considered to be a higher privilege
-        final Map<String, Long> impliesCount = new HashMap<>(privileges.size());
+        final Map<String, Long> impliesCount = Maps.newMapWithExpectedSize(privileges.size());
         privileges.forEach(
             priv -> impliesCount.put(
                 priv.name(),

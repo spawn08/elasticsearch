@@ -6,9 +6,6 @@
  */
 package org.elasticsearch.xpack.security.authc.saml;
 
-import com.sun.net.httpserver.HttpsServer;
-
-import org.apache.logging.log4j.message.ParameterizedMessage;
 import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.action.support.PlainActionFuture;
 import org.elasticsearch.common.settings.MockSecureSettings;
@@ -16,13 +13,16 @@ import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.settings.SettingsException;
 import org.elasticsearch.common.ssl.PemUtils;
 import org.elasticsearch.common.util.concurrent.ThreadContext;
+import org.elasticsearch.core.PathUtils;
+import org.elasticsearch.core.TimeValue;
 import org.elasticsearch.core.Tuple;
 import org.elasticsearch.env.Environment;
 import org.elasticsearch.env.TestEnvironment;
-import org.elasticsearch.jdk.JavaVersion;
 import org.elasticsearch.license.MockLicenseState;
 import org.elasticsearch.test.http.MockResponse;
 import org.elasticsearch.test.http.MockWebServer;
+import org.elasticsearch.threadpool.TestThreadPool;
+import org.elasticsearch.watcher.FileWatcher;
 import org.elasticsearch.watcher.ResourceWatcherService;
 import org.elasticsearch.xpack.core.XPackSettings;
 import org.elasticsearch.xpack.core.security.authc.AuthenticationResult;
@@ -39,6 +39,7 @@ import org.elasticsearch.xpack.core.ssl.TestsSSLService;
 import org.elasticsearch.xpack.security.Security;
 import org.elasticsearch.xpack.security.authc.Realms;
 import org.elasticsearch.xpack.security.authc.support.MockLookupRealm;
+import org.elasticsearch.xpack.security.support.FileReloadListener;
 import org.hamcrest.Matchers;
 import org.junit.Before;
 import org.mockito.Mockito;
@@ -58,10 +59,8 @@ import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.security.AccessController;
 import java.security.KeyStore;
 import java.security.PrivateKey;
-import java.security.PrivilegedAction;
 import java.security.PrivilegedActionException;
 import java.security.PublicKey;
 import java.security.cert.Certificate;
@@ -71,10 +70,12 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
 
+import static org.elasticsearch.core.Strings.format;
 import static org.elasticsearch.test.ActionListenerUtils.anyActionListener;
 import static org.elasticsearch.xpack.core.security.authc.RealmSettings.getFullSettingKey;
 import static org.hamcrest.Matchers.arrayContainingInAnyOrder;
@@ -87,7 +88,9 @@ import static org.hamcrest.Matchers.greaterThan;
 import static org.hamcrest.Matchers.greaterThanOrEqualTo;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.instanceOf;
+import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.iterableWithSize;
+import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.any;
@@ -150,7 +153,7 @@ public class SamlRealmTests extends SamlTestCase {
                 "xpack.security.http.ssl.certificate_authorities",
                 getDataPath("/org/elasticsearch/xpack/security/transport/ssl/certs/simple/testnode.crt")
             )
-            .putList("xpack.security.http.ssl.supported_protocols", getProtocols())
+            .putList("xpack.security.http.ssl.supported_protocols", XPackSettings.DEFAULT_SUPPORTED_PROTOCOLS)
             .put("path.home", createTempDir())
             .setSecureSettings(mockSecureSettings)
             .build();
@@ -375,7 +378,7 @@ public class SamlRealmTests extends SamlTestCase {
         try {
             return new SamlRealm(config, roleMapper, authenticator, logoutHandler, mock(SamlLogoutResponseHandler.class), () -> idp, sp);
         } catch (SettingsException e) {
-            logger.info(new ParameterizedMessage("Settings are invalid:\n{}", config.settings().toDelimitedString('\n')), e);
+            logger.info(() -> format("Settings are invalid:\n%s", config.settings().toDelimitedString('\n')), e);
             throw e;
         }
     }
@@ -816,6 +819,82 @@ public class SamlRealmTests extends SamlTestCase {
         assertThat(SamlRealm.findSamlRealms(realms, "incorrect", "https://idp.test:443/saml/login"), empty());
     }
 
+    public void testReadDifferentIdpMetadataSameKeyFromFiles() throws Exception {
+        // Confirm these files are located in /x-pack/plugin/security/src/test/resources/org/elasticsearch/xpack/security/authc/saml/
+        final Path originalMetadataPath = getDataPath("idp1.xml");
+        final Path updatedMetadataPath = getDataPath("idp1-same-certs-updated-id-cacheDuration.xml");
+        assertThat(Files.exists(originalMetadataPath), is(true));
+        assertThat(Files.exists(updatedMetadataPath), is(true));
+        // Confirm the file contents are different
+        assertThat(Files.readString(originalMetadataPath), is(not(equalTo(Files.readString(updatedMetadataPath)))));
+
+        // Use a temp file to trigger load and reload by ResourceWatcherService
+        final Path realmMetadataPath = Files.createTempFile(PathUtils.get(createTempDir().toString()), "idp1-metadata", "xml");
+
+        final RealmConfig.RealmIdentifier realmIdentifier = new RealmConfig.RealmIdentifier(SamlRealmSettings.TYPE, "saml-idp1");
+        final RealmConfig realmConfig = new RealmConfig(
+            realmIdentifier,
+            Settings.builder().put(RealmSettings.getFullSettingKey(realmIdentifier, RealmSettings.ORDER_SETTING), 1).build(),
+            this.env,
+            this.threadContext
+        );
+
+        final TestThreadPool testThreadPool = new TestThreadPool("Async Reload");
+        try {
+            // Put original metadata contents into realm metadata file
+            Files.writeString(realmMetadataPath, Files.readString(originalMetadataPath));
+
+            final TimeValue timeValue = TimeValue.timeValueMillis(10);
+            final Settings resourceWatcherSettings = Settings.builder()
+                .put(ResourceWatcherService.RELOAD_INTERVAL_HIGH.getKey(), timeValue)
+                .put(ResourceWatcherService.RELOAD_INTERVAL_MEDIUM.getKey(), timeValue)
+                .put(ResourceWatcherService.RELOAD_INTERVAL_LOW.getKey(), timeValue)
+                .build();
+            try (ResourceWatcherService watcherService = new ResourceWatcherService(resourceWatcherSettings, testThreadPool)) {
+                Tuple<RealmConfig, SSLService> config = buildConfig(realmMetadataPath.toString());
+                Tuple<AbstractReloadingMetadataResolver, Supplier<EntityDescriptor>> tuple = SamlRealm.initializeResolver(
+                    logger,
+                    config.v1(),
+                    config.v2(),
+                    watcherService
+                );
+                try {
+                    assertIdp1MetadataParsedCorrectly(tuple.v2().get());
+                    final IdpConfiguration idpConf = SamlRealm.getIdpConfiguration(realmConfig, tuple.v1(), tuple.v2());
+
+                    // Trigger initialized log message
+                    final List<PublicKey> keys1 = idpConf.getSigningCredentials().stream().map(Credential::getPublicKey).toList();
+
+                    // Add metadata update listener
+                    final CountDownLatch metadataUpdateLatch = new CountDownLatch(1);
+                    FileReloadListener metadataUpdateListener = new FileReloadListener(realmMetadataPath, metadataUpdateLatch::countDown);
+                    FileWatcher metadataUpdateWatcher = new FileWatcher(realmMetadataPath);
+                    metadataUpdateWatcher.addListener(metadataUpdateListener);
+                    watcherService.add(metadataUpdateWatcher, ResourceWatcherService.Frequency.MEDIUM);
+                    // Put updated metadata contents into realm metadata file
+                    Files.writeString(realmMetadataPath, Files.readString(updatedMetadataPath));
+                    // Remove metadata update listener
+                    metadataUpdateLatch.await();
+                    metadataUpdateWatcher.remove(metadataUpdateListener);
+
+                    assertThat(Files.readString(realmMetadataPath), is(equalTo(Files.readString(updatedMetadataPath))));
+                    // Trigger changed log message
+                    final List<PublicKey> keys2 = idpConf.getSigningCredentials().stream().map(Credential::getPublicKey).toList();
+                    assertThat(keys1, is(equalTo(keys2)));
+
+                    // Trigger not changed log message
+                    assertThat(Files.readString(realmMetadataPath), is(equalTo(Files.readString(updatedMetadataPath))));
+                    final List<PublicKey> keys3 = idpConf.getSigningCredentials().stream().map(Credential::getPublicKey).toList();
+                    assertThat(keys1, is(equalTo(keys3)));
+                } finally {
+                    tuple.v1().destroy();
+                }
+            }
+        } finally {
+            testThreadPool.shutdown();
+        }
+    }
+
     private EntityDescriptor mockIdp() {
         final EntityDescriptor descriptor = mock(EntityDescriptor.class);
         when(descriptor.getEntityID()).thenReturn("https://idp.saml/");
@@ -883,23 +962,5 @@ public class SamlRealmTests extends SamlTestCase {
         assertEquals(2, ssoServices.size());
         assertEquals(SAMLConstants.SAML2_POST_BINDING_URI, ssoServices.get(0).getBinding());
         assertEquals(SAMLConstants.SAML2_REDIRECT_BINDING_URI, ssoServices.get(1).getBinding());
-    }
-
-    /**
-     * The {@link HttpsServer} in the JDK has issues with TLSv1.3 when running in a JDK prior to
-     * 12.0.1 so we pin to TLSv1.2 when running on an earlier JDK
-     */
-    private static List<String> getProtocols() {
-        if (JavaVersion.current().compareTo(JavaVersion.parse("12")) < 0) {
-            return List.of("TLSv1.2");
-        } else {
-            JavaVersion full = AccessController.doPrivileged(
-                (PrivilegedAction<JavaVersion>) () -> JavaVersion.parse(System.getProperty("java.version"))
-            );
-            if (full.compareTo(JavaVersion.parse("12.0.1")) < 0) {
-                return List.of("TLSv1.2");
-            }
-        }
-        return XPackSettings.DEFAULT_SUPPORTED_PROTOCOLS;
     }
 }

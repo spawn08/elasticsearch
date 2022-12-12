@@ -10,7 +10,7 @@ package org.elasticsearch.rest.action.admin.indices;
 
 import org.elasticsearch.action.admin.indices.mapping.put.PutMappingRequest;
 import org.elasticsearch.action.support.IndicesOptions;
-import org.elasticsearch.client.node.NodeClient;
+import org.elasticsearch.client.internal.node.NodeClient;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.logging.DeprecationLogger;
 import org.elasticsearch.common.xcontent.XContentHelper;
@@ -24,7 +24,7 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 
-import static org.elasticsearch.client.Requests.putMappingRequest;
+import static org.elasticsearch.client.internal.Requests.putMappingRequest;
 import static org.elasticsearch.index.mapper.MapperService.isMappingSourceTyped;
 import static org.elasticsearch.rest.RestRequest.Method.POST;
 import static org.elasticsearch.rest.RestRequest.Method.PUT;
@@ -74,7 +74,7 @@ public class RestPutMappingAction extends BaseRestHandler {
             final String type = request.param("type");
             if (includeTypeName == false && (type != null || isMappingSourceTyped(MapperService.SINGLE_MAPPING_NAME, sourceAsMap))) {
                 throw new IllegalArgumentException(
-                    "Types cannot be provided in put mapping requests, unless " + "the include_type_name parameter is set to true."
+                    "Types cannot be provided in put mapping requests, unless the include_type_name parameter is set to true."
                 );
             }
 
@@ -94,7 +94,7 @@ public class RestPutMappingAction extends BaseRestHandler {
         return channel -> client.admin().indices().putMapping(putMappingRequest, new RestToXContentListener<>(channel));
     }
 
-    private Map<String, Object> prepareV7Mappings(boolean includeTypeName, Map<String, Object> mappings) {
+    private static Map<String, Object> prepareV7Mappings(boolean includeTypeName, Map<String, Object> mappings) {
         if (includeTypeName && mappings != null && mappings.size() == 1) {
             String typeName = mappings.keySet().iterator().next();
             if (Strings.hasText(typeName) == false) {

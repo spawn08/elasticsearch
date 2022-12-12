@@ -12,7 +12,7 @@ import org.elasticsearch.action.admin.indices.alias.Alias;
 import org.elasticsearch.action.admin.indices.forcemerge.ForceMergeResponse;
 import org.elasticsearch.action.admin.indices.refresh.RefreshResponse;
 import org.elasticsearch.action.search.SearchResponse;
-import org.elasticsearch.client.Client;
+import org.elasticsearch.client.internal.Client;
 import org.elasticsearch.common.bytes.BytesArray;
 import org.elasticsearch.common.settings.SecureString;
 import org.elasticsearch.common.settings.Settings;
@@ -24,9 +24,9 @@ import org.elasticsearch.test.SecuritySingleNodeTestCase;
 import org.elasticsearch.test.hamcrest.ElasticsearchAssertions;
 import org.elasticsearch.xcontent.XContentType;
 import org.elasticsearch.xpack.core.XPackSettings;
-import org.elasticsearch.xpack.core.security.action.CreateApiKeyAction;
-import org.elasticsearch.xpack.core.security.action.CreateApiKeyRequest;
-import org.elasticsearch.xpack.core.security.action.CreateApiKeyResponse;
+import org.elasticsearch.xpack.core.security.action.apikey.CreateApiKeyAction;
+import org.elasticsearch.xpack.core.security.action.apikey.CreateApiKeyRequest;
+import org.elasticsearch.xpack.core.security.action.apikey.CreateApiKeyResponse;
 import org.elasticsearch.xpack.core.security.authz.RoleDescriptor;
 import org.junit.Before;
 
@@ -36,6 +36,7 @@ import java.util.Arrays;
 import java.util.Base64;
 import java.util.Collection;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
@@ -96,7 +97,7 @@ public class DlsFlsRequestCacheTests extends SecuritySingleNodeTestCase {
 
     @Override
     protected String configRoles() {
-        return """
+        return String.format(Locale.ROOT, """
             %s%s:
               cluster: [ "manage_own_api_key" ]
               indices:
@@ -160,7 +161,7 @@ public class DlsFlsRequestCacheTests extends SecuritySingleNodeTestCase {
                 privileges:
                 - "read"
                 query: {"template":{"id":"my-script"}}
-            """.formatted(super.configRoles(), DLS_FLS_USER, DLS_TEMPLATE_ROLE_QUERY_ROLE);
+            """, super.configRoles(), DLS_FLS_USER, DLS_TEMPLATE_ROLE_QUERY_ROLE);
     }
 
     @Override

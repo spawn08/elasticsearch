@@ -10,7 +10,7 @@ package org.elasticsearch.xpack.fleet.rest;
 import org.elasticsearch.action.search.MultiSearchAction;
 import org.elasticsearch.action.search.MultiSearchRequest;
 import org.elasticsearch.action.search.SearchRequest;
-import org.elasticsearch.client.node.NodeClient;
+import org.elasticsearch.client.internal.node.NodeClient;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.core.TimeValue;
 import org.elasticsearch.rest.BaseRestHandler;
@@ -19,6 +19,7 @@ import org.elasticsearch.rest.action.RestCancellableNodeClient;
 import org.elasticsearch.rest.action.RestToXContentListener;
 import org.elasticsearch.rest.action.search.RestMultiSearchAction;
 import org.elasticsearch.rest.action.search.RestSearchAction;
+import org.elasticsearch.usage.SearchUsageHolder;
 
 import java.io.IOException;
 import java.util.Arrays;
@@ -35,9 +36,11 @@ import static org.elasticsearch.rest.RestRequest.Method.POST;
 public class RestFleetMultiSearchAction extends BaseRestHandler {
 
     private final boolean allowExplicitIndex;
+    private final SearchUsageHolder searchUsageHolder;
 
-    public RestFleetMultiSearchAction(Settings settings) {
+    public RestFleetMultiSearchAction(Settings settings, SearchUsageHolder searchUsageHolder) {
         this.allowExplicitIndex = MULTI_ALLOW_EXPLICIT_INDEX.get(settings);
+        this.searchUsageHolder = searchUsageHolder;
     }
 
     @Override
@@ -61,6 +64,7 @@ public class RestFleetMultiSearchAction extends BaseRestHandler {
             request,
             client.getNamedWriteableRegistry(),
             allowExplicitIndex,
+            searchUsageHolder,
             (key, value, searchRequest) -> {
                 if ("wait_for_checkpoints".equals(key)) {
                     String[] stringWaitForCheckpoints = nodeStringArrayValue(value);

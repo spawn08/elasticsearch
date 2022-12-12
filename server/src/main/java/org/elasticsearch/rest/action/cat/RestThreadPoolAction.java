@@ -16,7 +16,7 @@ import org.elasticsearch.action.admin.cluster.node.stats.NodesStatsRequest;
 import org.elasticsearch.action.admin.cluster.node.stats.NodesStatsResponse;
 import org.elasticsearch.action.admin.cluster.state.ClusterStateRequest;
 import org.elasticsearch.action.admin.cluster.state.ClusterStateResponse;
-import org.elasticsearch.client.node.NodeClient;
+import org.elasticsearch.client.internal.node.NodeClient;
 import org.elasticsearch.cluster.node.DiscoveryNode;
 import org.elasticsearch.cluster.node.DiscoveryNodes;
 import org.elasticsearch.common.Table;
@@ -39,9 +39,12 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 
+import static org.elasticsearch.common.util.set.Sets.addToCopy;
 import static org.elasticsearch.rest.RestRequest.Method.GET;
 
 public class RestThreadPoolAction extends AbstractCatAction {
+
+    private static final Set<String> RESPONSE_PARAMS = addToCopy(AbstractCatAction.RESPONSE_PARAMS, "thread_pool_patterns");
 
     @Override
     public List<Route> routes() {
@@ -90,14 +93,6 @@ public class RestThreadPoolAction extends AbstractCatAction {
                 });
             }
         });
-    }
-
-    private static final Set<String> RESPONSE_PARAMS;
-
-    static {
-        final Set<String> responseParams = new HashSet<>(AbstractCatAction.RESPONSE_PARAMS);
-        responseParams.add("thread_pool_patterns");
-        RESPONSE_PARAMS = Collections.unmodifiableSet(responseParams);
     }
 
     @Override

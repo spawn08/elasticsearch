@@ -9,7 +9,7 @@
 package org.elasticsearch.rest.action.admin.indices;
 
 import org.elasticsearch.action.admin.indices.create.CreateIndexRequest;
-import org.elasticsearch.client.node.NodeClient;
+import org.elasticsearch.client.internal.node.NodeClient;
 import org.elasticsearch.common.bytes.BytesArray;
 import org.elasticsearch.common.bytes.BytesReference;
 import org.elasticsearch.common.xcontent.XContentHelper;
@@ -147,7 +147,7 @@ public class RestCreateIndexActionTests extends ESTestCase {
             .withContent(new BytesArray(content), null)
             .build();
 
-        CreateIndexRequest createIndexRequest = action.prepareRequestV7(request);
+        CreateIndexRequest createIndexRequest = RestCreateIndexAction.prepareRequestV7(request);
         // some_type is replaced with _doc
         assertThat(createIndexRequest.mappings(), equalTo("""
             {"_doc":{"properties":{"field1":{"type":"text"}}}}"""));

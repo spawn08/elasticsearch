@@ -81,6 +81,11 @@ public class NestedPathFieldMapper extends MetadataFieldMapper {
         public ValueFetcher valueFetcher(SearchExecutionContext context, String format) {
             throw new UnsupportedOperationException("Cannot fetch values for internal field [" + name() + "].");
         }
+
+        @Override
+        public boolean mayExistInIndex(SearchExecutionContext context) {
+            return false;
+        }
     }
 
     private NestedPathFieldMapper(String name) {
@@ -92,4 +97,8 @@ public class NestedPathFieldMapper extends MetadataFieldMapper {
         return NAME;
     }
 
+    @Override
+    public SourceLoader.SyntheticFieldLoader syntheticFieldLoader() {
+        return SourceLoader.SyntheticFieldLoader.NOTHING;
+    }
 }

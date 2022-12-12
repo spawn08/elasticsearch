@@ -49,8 +49,7 @@ public class TypeParsers {
             }
         }
         for (Object value : meta.values()) {
-            if (value instanceof String) {
-                String sValue = (String) value;
+            if (value instanceof String sValue) {
                 if (sValue.codePointCount(0, sValue.length()) > 50) {
                     throw new MapperParsingException(
                         "[meta] values can't be longer than 50 chars, but got [" + value + "] for field [" + name + "]"
@@ -111,7 +110,7 @@ public class TypeParsers {
                 }
             }
 
-            parserContext = parserContext.createMultiFieldContext(parserContext);
+            parserContext = MappingParserContext.createMultiFieldContext(parserContext);
 
             final Map<String, Object> multiFieldsPropNodes;
             if (propNode instanceof List && ((List<?>) propNode).isEmpty()) {
@@ -134,7 +133,7 @@ public class TypeParsers {
                 String multiFieldName = multiFieldEntry.getKey();
                 if (multiFieldName.contains(".")) {
                     throw new MapperParsingException(
-                        "Field name [" + multiFieldName + "] which is a multi field of [" + name + "] cannot" + " contain '.'"
+                        "Field name [" + multiFieldName + "] which is a multi field of [" + name + "] cannot contain '.'"
                     );
                 }
                 if ((multiFieldEntry.getValue() instanceof Map) == false) {

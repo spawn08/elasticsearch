@@ -7,22 +7,25 @@
 package org.elasticsearch.xpack.core.ilm;
 
 import org.elasticsearch.Version;
-import org.elasticsearch.cluster.AbstractDiffable;
 import org.elasticsearch.cluster.Diff;
 import org.elasticsearch.cluster.DiffableUtils;
 import org.elasticsearch.cluster.NamedDiff;
+import org.elasticsearch.cluster.SimpleDiffable;
 import org.elasticsearch.cluster.metadata.Metadata;
 import org.elasticsearch.cluster.metadata.Metadata.Custom;
 import org.elasticsearch.common.Strings;
+import org.elasticsearch.common.collect.Iterators;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
+import org.elasticsearch.common.xcontent.ChunkedToXContentHelper;
 import org.elasticsearch.xcontent.ConstructingObjectParser;
 import org.elasticsearch.xcontent.ParseField;
-import org.elasticsearch.xcontent.XContentBuilder;
+import org.elasticsearch.xcontent.ToXContent;
 
 import java.io.IOException;
 import java.util.Collections;
 import java.util.EnumSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -100,10 +103,11 @@ public class IndexLifecycleMetadata implements Metadata.Custom {
     }
 
     @Override
-    public XContentBuilder toXContent(XContentBuilder builder, Params params) throws IOException {
-        builder.xContentValuesMap(POLICIES_FIELD.getPreferredName(), policyMetadatas);
-        builder.field(OPERATION_MODE_FIELD.getPreferredName(), operationMode);
-        return builder;
+    public Iterator<? extends ToXContent> toXContentChunked(ToXContent.Params ignored) {
+        return Iterators.concat(
+            ChunkedToXContentHelper.xContentValuesMap(POLICIES_FIELD.getPreferredName(), policyMetadatas),
+            Iterators.single((builder, params) -> builder.field(OPERATION_MODE_FIELD.getPreferredName(), operationMode))
+        );
     }
 
     @Override
@@ -188,7 +192,7 @@ public class IndexLifecycleMetadata implements Metadata.Custom {
         }
 
         static Diff<LifecyclePolicyMetadata> readLifecyclePolicyDiffFrom(StreamInput in) throws IOException {
-            return AbstractDiffable.readDiffFrom(LifecyclePolicyMetadata::new, in);
+            return SimpleDiffable.readDiffFrom(LifecyclePolicyMetadata::new, in);
         }
     }
 }

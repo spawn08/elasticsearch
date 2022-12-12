@@ -12,8 +12,8 @@ import org.elasticsearch.action.DocWriteRequest;
 import org.elasticsearch.action.bulk.BulkRequest;
 import org.elasticsearch.action.bulk.BulkShardRequest;
 import org.elasticsearch.action.support.ActiveShardCount;
-import org.elasticsearch.client.Requests;
-import org.elasticsearch.client.node.NodeClient;
+import org.elasticsearch.client.internal.Requests;
+import org.elasticsearch.client.internal.node.NodeClient;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.core.RestApiVersion;
 import org.elasticsearch.rest.BaseRestHandler;
@@ -37,7 +37,7 @@ import static org.elasticsearch.rest.RestRequest.Method.PUT;
  * </pre>
  */
 public class RestBulkAction extends BaseRestHandler {
-    public static final String TYPES_DEPRECATION_MESSAGE = "[types removal]" + " Specifying types in bulk requests is deprecated.";
+    public static final String TYPES_DEPRECATION_MESSAGE = "[types removal] Specifying types in bulk requests is deprecated.";
 
     private final boolean allowExplicitIndex;
 

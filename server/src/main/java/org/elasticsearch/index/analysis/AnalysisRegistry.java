@@ -15,7 +15,7 @@ import org.elasticsearch.ElasticsearchException;
 import org.elasticsearch.Version;
 import org.elasticsearch.cluster.metadata.IndexMetadata;
 import org.elasticsearch.common.settings.Settings;
-import org.elasticsearch.core.internal.io.IOUtils;
+import org.elasticsearch.core.IOUtils;
 import org.elasticsearch.env.Environment;
 import org.elasticsearch.index.IndexSettings;
 import org.elasticsearch.index.mapper.TextFieldMapper;
@@ -35,7 +35,6 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.BiFunction;
 import java.util.function.Function;
-import java.util.stream.Collectors;
 
 import static java.util.Collections.unmodifiableMap;
 
@@ -46,6 +45,7 @@ import static java.util.Collections.unmodifiableMap;
 public final class AnalysisRegistry implements Closeable {
     public static final String INDEX_ANALYSIS_CHAR_FILTER = "index.analysis.char_filter";
     public static final String INDEX_ANALYSIS_FILTER = "index.analysis.filter";
+    public static final String INDEX_ANALYSIS_ANALYZER = "index.analysis.analyzer";
     public static final String INDEX_ANALYSIS_TOKENIZER = "index.analysis.tokenizer";
 
     public static final String DEFAULT_ANALYZER_NAME = "default";
@@ -215,7 +215,6 @@ public final class AnalysisRegistry implements Closeable {
      *
      * Callers are responsible for closing the returned Analyzer
      */
-    @SuppressWarnings("HiddenField")
     public NamedAnalyzer buildCustomAnalyzer(
         IndexSettings indexSettings,
         boolean normalizer,
@@ -394,7 +393,7 @@ public final class AnalysisRegistry implements Closeable {
         );
     }
 
-    private <T> AnalysisProvider<T> getProvider(
+    private static <T> AnalysisProvider<T> getProvider(
         Component componentType,
         String componentName,
         IndexSettings indexSettings,
@@ -582,14 +581,11 @@ public final class AnalysisRegistry implements Closeable {
 
         @Override
         public void close() throws IOException {
-            IOUtils.close(
-                analyzerProviderFactories.values().stream().map((a) -> ((PreBuiltAnalyzerProviderFactory) a)).collect(Collectors.toList())
-            );
+            IOUtils.close(analyzerProviderFactories.values().stream().map((a) -> ((PreBuiltAnalyzerProviderFactory) a)).toList());
         }
     }
 
-    @SuppressWarnings("HiddenField")
-    public IndexAnalyzers build(
+    public static IndexAnalyzers build(
         IndexSettings indexSettings,
         Map<String, AnalyzerProvider<?>> analyzerProviders,
         Map<String, AnalyzerProvider<?>> normalizerProviders,
@@ -715,8 +711,7 @@ public final class AnalysisRegistry implements Closeable {
         return analyzer;
     }
 
-    @SuppressWarnings("HiddenField")
-    private void processNormalizerFactory(
+    private static void processNormalizerFactory(
         String name,
         AnalyzerProvider<?> normalizerFactory,
         Map<String, NamedAnalyzer> normalizers,

@@ -7,80 +7,92 @@
 
 package org.elasticsearch.xpack.security.profile;
 
-import org.elasticsearch.action.admin.indices.get.GetIndexAction;
-import org.elasticsearch.action.admin.indices.get.GetIndexRequest;
-import org.elasticsearch.common.settings.Settings;
-import org.elasticsearch.index.mapper.extras.MapperExtrasPlugin;
-import org.elasticsearch.plugins.Plugin;
+import org.elasticsearch.action.support.PlainActionFuture;
 import org.elasticsearch.test.SecuritySingleNodeTestCase;
-import org.elasticsearch.xpack.security.support.SecuritySystemIndices;
+import org.elasticsearch.xpack.core.security.action.profile.Profile;
+import org.elasticsearch.xpack.core.security.authc.Authentication;
+import org.elasticsearch.xpack.core.security.user.User;
 
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Map;
+import java.util.Comparator;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
-import static org.elasticsearch.test.SecuritySettingsSource.TEST_PASSWORD_HASHED;
-import static org.hamcrest.Matchers.arrayContaining;
+import static org.elasticsearch.xpack.core.security.authc.AuthenticationTestHelper.randomRealmRef;
+import static org.hamcrest.Matchers.contains;
+import static org.hamcrest.Matchers.emptyIterable;
 import static org.hamcrest.Matchers.equalTo;
-import static org.hamcrest.Matchers.hasItems;
-import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.not;
 
 public class ProfileSingleNodeTests extends SecuritySingleNodeTestCase {
 
-    private static final String RAC_USER_NAME = "rac_user";
+    // This test must run with a single node cluster. The security index has no replica shard on a single node cluster.
+    // Thus, it avoids the "dirty read" problem, i.e. reading un-fully-committed from the primary shard but the subsequent
+    // read from the replica shard still sees the old version.
+    public void testConcurrentActivateUpdates() throws InterruptedException {
+        final Authentication.RealmRef realmRef = randomRealmRef(false);
+        final User originalUser = new User(randomAlphaOfLengthBetween(5, 12));
+        final Authentication originalAuthentication = Authentication.newRealmAuthentication(originalUser, realmRef);
 
-    @Override
-    protected String configUsers() {
-        return super.configUsers() + RAC_USER_NAME + ":" + TEST_PASSWORD_HASHED + "\n";
+        final ProfileService profileService = getInstanceFromNode(ProfileService.class);
+        final PlainActionFuture<Profile> originalFuture = new PlainActionFuture<>();
+        profileService.activateProfile(originalAuthentication, originalFuture);
+        final Profile originalProfile = originalFuture.actionGet();
+
+        final Thread[] threads = new Thread[randomIntBetween(5, 10)];
+        final CountDownLatch readyLatch = new CountDownLatch(threads.length);
+        final CountDownLatch startLatch = new CountDownLatch(1);
+        final Set<Profile> updatedProfiles = ConcurrentHashMap.newKeySet();
+        final Authentication updatedAuthentication = Authentication.newRealmAuthentication(
+            new User(originalUser.principal(), "foo"),
+            realmRef
+        );
+        // All concurrent activations should succeed because we handle version conflict error and check whether update
+        // can be skipped. In this case, they can be skipped because all updates are for the same content.
+        // NOTE: The above statement is why this test needs to run with a single node cluster. On a multi-node cluster,
+        // version conflict error can still be thrown and must be handled by callers.
+        //
+        // Due to the concurrency nature, there is no guarantee whether an update can succeed or succeed with error handling.
+        // We can only be sure that at least one of them will succeed.
+        // Other updates may succeed or they may succeed with the error handling. So we cannot assert that the document
+        // is only updated once. What we can assert is that they will all be successful (one way or another).
+        for (int i = 0; i < threads.length; i++) {
+            threads[i] = new Thread(() -> {
+                try {
+                    final PlainActionFuture<Profile> future = new PlainActionFuture<>();
+                    readyLatch.countDown();
+                    startLatch.await();
+                    profileService.activateProfile(updatedAuthentication, future);
+                    final Profile updatedProfile = future.actionGet();
+                    assertThat(updatedProfile.uid(), equalTo(originalProfile.uid()));
+                    assertThat(updatedProfile.user().roles(), contains("foo"));
+                    updatedProfiles.add(updatedProfile);
+                } catch (Exception e) {
+                    logger.error(e);
+                    fail("caught error when activating existing profile: " + e);
+                }
+            });
+            threads[i].start();
+        }
+
+        if (readyLatch.await(20, TimeUnit.SECONDS)) {
+            startLatch.countDown();
+            for (Thread thread : threads) {
+                thread.join();
+            }
+            assertThat(updatedProfiles, not(emptyIterable()));
+            // Find the most recent version of the updated profile document using the seqNo which is monotonically increasing
+            final Profile updatedProfile = updatedProfiles.stream()
+                .max(Comparator.comparingLong(p -> p.versionControl().seqNo()))
+                .orElseThrow();
+            // Update again, this time it should simply skip due to grace period of 30 seconds
+            final PlainActionFuture<Profile> future = new PlainActionFuture<>();
+            profileService.activateProfile(updatedAuthentication, future);
+            assertThat(future.actionGet(), equalTo(updatedProfile));
+        } else {
+            fail("Not all threads are ready after waiting");
+        }
     }
 
-    @Override
-    protected String configRoles() {
-        return super.configRoles() + "rac_role:\n" + "  cluster:\n" + "    - 'manage_own_api_key'\n" + "    - 'monitor'\n";
-    }
-
-    @Override
-    protected String configUsersRoles() {
-        return super.configUsersRoles() + "rac_role:" + RAC_USER_NAME + "\n";
-    }
-
-    @Override
-    protected Collection<Class<? extends Plugin>> getPlugins() {
-        final ArrayList<Class<? extends Plugin>> plugins = new ArrayList<>(super.getPlugins());
-        plugins.add(MapperExtrasPlugin.class);
-        return plugins;
-    }
-
-    public void testProfileIndexAutoCreation() {
-        var indexResponse = client().prepareIndex(
-            randomFrom(SecuritySystemIndices.INTERNAL_SECURITY_PROFILE_INDEX_8, SecuritySystemIndices.SECURITY_PROFILE_ALIAS)
-        ).setSource(Map.of("uid", randomAlphaOfLength(22))).get();
-
-        assertThat(indexResponse.status().getStatus(), equalTo(201));
-
-        var getIndexRequest = new GetIndexRequest();
-        getIndexRequest.indices(SecuritySystemIndices.INTERNAL_SECURITY_PROFILE_INDEX_8);
-
-        var getIndexResponse = client().execute(GetIndexAction.INSTANCE, getIndexRequest).actionGet();
-
-        assertThat(getIndexResponse.getIndices(), arrayContaining(SecuritySystemIndices.INTERNAL_SECURITY_PROFILE_INDEX_8));
-
-        var aliases = getIndexResponse.getAliases().get(SecuritySystemIndices.INTERNAL_SECURITY_PROFILE_INDEX_8);
-        assertThat(aliases, hasSize(1));
-        assertThat(aliases.get(0).alias(), equalTo(SecuritySystemIndices.SECURITY_PROFILE_ALIAS));
-
-        final Settings settings = getIndexResponse.getSettings().get(SecuritySystemIndices.INTERNAL_SECURITY_PROFILE_INDEX_8);
-        assertThat(settings.get("index.number_of_shards"), equalTo("1"));
-        assertThat(settings.get("index.auto_expand_replicas"), equalTo("0-1"));
-        assertThat(settings.get("index.routing.allocation.include._tier_preference"), equalTo("data_content"));
-
-        final Map<String, Object> mappings = getIndexResponse.getMappings()
-            .get(SecuritySystemIndices.INTERNAL_SECURITY_PROFILE_INDEX_8)
-            .getSourceAsMap();
-
-        @SuppressWarnings("unchecked")
-        final Set<String> topLevelFields = ((Map<String, Object>) mappings.get("properties")).keySet();
-        assertThat(topLevelFields, hasItems("uid", "enabled", "last_synchronized", "user", "access", "application_data"));
-    }
 }

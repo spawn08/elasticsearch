@@ -12,7 +12,6 @@ import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.action.DocWriteRequest;
 import org.elasticsearch.action.delete.DeleteRequest;
 import org.elasticsearch.action.index.IndexRequest;
-import org.elasticsearch.client.Client;
 import org.elasticsearch.common.bytes.BytesReference;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.unit.ByteSizeUnit;
@@ -205,47 +204,6 @@ public class BulkProcessor implements Closeable {
     }
 
     /**
-     * @param client The client that executes the bulk operations
-     * @param listener The BulkProcessor listener that gets called on bulk events
-     * @param flushScheduler The scheduler that is used to flush
-     * @param retryScheduler The scheduler that is used for retries
-     * @param onClose The runnable instance that is executed on close. Consumers are required to clean up the schedulers.
-     * @return the builder for BulkProcessor
-     */
-    public static Builder builder(Client client, Listener listener, Scheduler flushScheduler, Scheduler retryScheduler, Runnable onClose) {
-        Objects.requireNonNull(client, "client");
-        Objects.requireNonNull(listener, "listener");
-        return new Builder(client::bulk, listener, flushScheduler, retryScheduler, onClose);
-    }
-
-    /**
-     * @param client The client that executes the bulk operations
-     * @param listener The BulkProcessor listener that gets called on bulk events
-     * @return the builder for BulkProcessor
-     * @deprecated Use {@link #builder(BiConsumer, Listener, String)}
-     * with client::bulk as the first argument, or {@link #builder(org.elasticsearch.client.Client,
-     * org.elasticsearch.action.bulk.BulkProcessor.Listener, org.elasticsearch.threadpool.Scheduler,
-     * org.elasticsearch.threadpool.Scheduler, java.lang.Runnable)} and manage the flush and retry schedulers explicitly
-     */
-    @Deprecated
-    public static Builder builder(Client client, Listener listener) {
-        Objects.requireNonNull(client, "client");
-        Objects.requireNonNull(listener, "listener");
-        return new Builder(client::bulk, listener, client.threadPool(), client.threadPool(), () -> {});
-    }
-
-    /**
-     * @param consumer The consumer that is called to fulfil bulk operations
-     * @param listener The BulkProcessor listener that gets called on bulk events
-     * @return the builder for BulkProcessor
-     * @deprecated use {@link #builder(BiConsumer, Listener, String)} instead
-     */
-    @Deprecated
-    public static Builder builder(BiConsumer<BulkRequest, ActionListener<BulkResponse>> consumer, Listener listener) {
-        return builder(consumer, listener, "anonymous-bulk-processor");
-    }
-
-    /**
      * @param consumer The consumer that is called to fulfil bulk operations
      * @param listener The BulkProcessor listener that gets called on bulk events
      * @param name     The name of this processor, e.g. to identify the scheduler threads
@@ -277,7 +235,7 @@ public class BulkProcessor implements Closeable {
 
     private BulkRequest bulkRequest;
     private final Supplier<BulkRequest> bulkRequestSupplier;
-    private Supplier<Boolean> flushSupplier;
+    private final Supplier<Boolean> flushSupplier;
     private final BulkRequestHandler bulkRequestHandler;
     private final Runnable onClose;
 
@@ -516,9 +474,9 @@ public class BulkProcessor implements Closeable {
         if (isOverTheLimit() == false) {
             return null;
         }
-        final BulkRequest currentBulkRequest = this.bulkRequest;
+        final BulkRequest bulkRequest = this.bulkRequest;
         this.bulkRequest = bulkRequestSupplier.get();
-        return new Tuple<>(currentBulkRequest, executionIdGen.incrementAndGet());
+        return new Tuple<>(bulkRequest, executionIdGen.incrementAndGet());
     }
 
     // may be executed without a lock
@@ -529,11 +487,11 @@ public class BulkProcessor implements Closeable {
     // needs to be executed under a lock
     private void execute() {
         if (flushSupplier.get()) {
-            final BulkRequest currentBulkRequest = this.bulkRequest;
+            final BulkRequest bulkRequest = this.bulkRequest;
             final long executionId = executionIdGen.incrementAndGet();
 
             this.bulkRequest = bulkRequestSupplier.get();
-            execute(currentBulkRequest, executionId);
+            execute(bulkRequest, executionId);
         }
     }
 

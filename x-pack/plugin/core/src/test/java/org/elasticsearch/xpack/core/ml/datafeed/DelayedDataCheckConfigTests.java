@@ -8,7 +8,7 @@ package org.elasticsearch.xpack.core.ml.datafeed;
 
 import org.elasticsearch.common.io.stream.Writeable;
 import org.elasticsearch.core.TimeValue;
-import org.elasticsearch.test.AbstractSerializingTestCase;
+import org.elasticsearch.test.AbstractXContentSerializingTestCase;
 import org.elasticsearch.xcontent.XContentParser;
 
 import java.io.IOException;
@@ -17,7 +17,7 @@ import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.nullValue;
 import static org.hamcrest.core.Is.is;
 
-public class DelayedDataCheckConfigTests extends AbstractSerializingTestCase<DelayedDataCheckConfig> {
+public class DelayedDataCheckConfigTests extends AbstractXContentSerializingTestCase<DelayedDataCheckConfig> {
 
     @Override
     protected DelayedDataCheckConfig createTestInstance() {
@@ -72,24 +72,23 @@ public class DelayedDataCheckConfigTests extends AbstractSerializingTestCase<Del
         boolean enabled = instance.isEnabled();
         TimeValue timeWindow = instance.getCheckWindow();
         switch (between(0, 1)) {
-            case 0:
+            case 0 -> {
                 enabled = enabled == false;
                 if (randomBoolean()) {
                     timeWindow = TimeValue.timeValueMillis(randomLongBetween(1, 1000));
                 } else {
                     timeWindow = null;
                 }
-                break;
-            case 1:
+            }
+            case 1 -> {
                 if (timeWindow == null) {
                     timeWindow = TimeValue.timeValueMillis(randomLongBetween(1, 1000));
                 } else {
                     timeWindow = new TimeValue(timeWindow.getMillis() + between(10, 100));
                 }
                 enabled = true;
-                break;
-            default:
-                throw new AssertionError("Illegal randomisation branch");
+            }
+            default -> throw new AssertionError("Illegal randomisation branch");
         }
         return new DelayedDataCheckConfig(enabled, timeWindow);
     }

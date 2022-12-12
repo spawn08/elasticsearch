@@ -12,7 +12,7 @@ import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.action.ActionListenerResponseHandler;
 import org.elasticsearch.action.support.ActionFilters;
 import org.elasticsearch.action.support.HandledTransportAction;
-import org.elasticsearch.client.Client;
+import org.elasticsearch.client.internal.Client;
 import org.elasticsearch.cluster.service.ClusterService;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.io.stream.NamedWriteableRegistry;
@@ -232,8 +232,7 @@ public class TransportEqlSearchAction extends HandledTransportAction<EqlSearchRe
                 request.fetchSize(),
                 clientId,
                 new TaskId(nodeId, task.getId()),
-                task,
-                remoteClusterRegistry::versionIncompatibleClusters
+                task
             );
             executeRequestWithRetryAttempt(
                 clusterService,

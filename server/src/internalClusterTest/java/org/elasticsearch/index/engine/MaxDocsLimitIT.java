@@ -8,7 +8,6 @@
 
 package org.elasticsearch.index.engine;
 
-import org.apache.lucene.index.IndexWriterMaxDocsChanger;
 import org.elasticsearch.action.index.IndexResponse;
 import org.elasticsearch.action.search.SearchResponse;
 import org.elasticsearch.cluster.metadata.IndexMetadata;
@@ -65,14 +64,15 @@ public class MaxDocsLimitIT extends ESIntegTestCase {
     @Before
     public void setMaxDocs() {
         maxDocs.set(randomIntBetween(10, 100)); // Do not set this too low as we can fail to write the cluster state
-        IndexWriterMaxDocsChanger.setMaxDocs(maxDocs.get());
+        setIndexWriterMaxDocs(maxDocs.get());
     }
 
     @After
     public void restoreMaxDocs() {
-        IndexWriterMaxDocsChanger.restoreMaxDocs();
+        restoreIndexWriterMaxDocs();
     }
 
+    @AwaitsFix(bugUrl = "https://github.com/elastic/elasticsearch/issues/92037")
     public void testMaxDocsLimit() throws Exception {
         internalCluster().ensureAtLeastNumDataNodes(1);
         assertAcked(
@@ -156,15 +156,7 @@ public class MaxDocsLimitIT extends ESIntegTestCase {
         assertThat(searchResponse.getHits().getTotalHits().value, equalTo((long) totalSuccess));
     }
 
-    static final class IndexingResult {
-        final int numSuccess;
-        final int numFailures;
-
-        IndexingResult(int numSuccess, int numFailures) {
-            this.numSuccess = numSuccess;
-            this.numFailures = numFailures;
-        }
-    }
+    record IndexingResult(int numSuccess, int numFailures) {}
 
     static IndexingResult indexDocs(int numRequests, int numThreads) throws Exception {
         final AtomicInteger completedRequests = new AtomicInteger();

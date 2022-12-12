@@ -10,7 +10,7 @@ package org.elasticsearch.rest.action.document;
 
 import org.elasticsearch.action.termvectors.MultiTermVectorsRequest;
 import org.elasticsearch.action.termvectors.TermVectorsRequest;
-import org.elasticsearch.client.node.NodeClient;
+import org.elasticsearch.client.internal.node.NodeClient;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.logging.DeprecationLogger;
 import org.elasticsearch.core.RestApiVersion;
@@ -27,7 +27,7 @@ import static org.elasticsearch.rest.RestRequest.Method.POST;
 
 public class RestMultiTermVectorsAction extends BaseRestHandler {
     private static final DeprecationLogger deprecationLogger = DeprecationLogger.getLogger(RestMultiTermVectorsAction.class);
-    static final String TYPES_DEPRECATION_MESSAGE = "[types removal] " + "Specifying types in multi term vector requests is deprecated.";
+    static final String TYPES_DEPRECATION_MESSAGE = "[types removal] Specifying types in multi term vector requests is deprecated.";
 
     @Override
     public List<Route> routes() {

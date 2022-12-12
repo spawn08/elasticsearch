@@ -46,11 +46,13 @@ import org.elasticsearch.common.logging.DeprecationLogger;
 import org.elasticsearch.common.xcontent.LoggingDeprecationHandler;
 import org.elasticsearch.common.xcontent.XContentHelper;
 import org.elasticsearch.core.RestApiVersion;
+import org.elasticsearch.index.fielddata.FieldDataContext;
 import org.elasticsearch.index.fielddata.IndexFieldData;
 import org.elasticsearch.index.fielddata.IndexFieldDataCache;
 import org.elasticsearch.index.mapper.LuceneDocument;
 import org.elasticsearch.index.mapper.MappedFieldType;
 import org.elasticsearch.index.mapper.MapperService;
+import org.elasticsearch.index.mapper.NestedLookup;
 import org.elasticsearch.index.mapper.ParsedDocument;
 import org.elasticsearch.index.mapper.SourceToParse;
 import org.elasticsearch.index.query.AbstractQueryBuilder;
@@ -231,7 +233,7 @@ public class PercolateQueryBuilder extends AbstractQueryBuilder<PercolateQueryBu
         } else {
             indexedDocumentVersion = null;
         }
-        documents = in.readList(StreamInput::readBytesReference);
+        documents = in.readImmutableList(StreamInput::readBytesReference);
         if (documents.isEmpty() == false) {
             documentXContentType = in.readEnum(XContentType.class);
         } else {
@@ -274,10 +276,7 @@ public class PercolateQueryBuilder extends AbstractQueryBuilder<PercolateQueryBu
         } else {
             out.writeBoolean(false);
         }
-        out.writeVInt(documents.size());
-        for (BytesReference document : documents) {
-            out.writeBytesReference(document);
-        }
+        out.writeCollection(documents, StreamOutput::writeBytesReference);
         if (documents.isEmpty() == false) {
             XContentHelper.writeTo(out, documentXContentType);
         }
@@ -326,7 +325,7 @@ public class PercolateQueryBuilder extends AbstractQueryBuilder<PercolateQueryBu
                 builder.field(INDEXED_DOCUMENT_FIELD_VERSION.getPreferredName(), indexedDocumentVersion);
             }
         }
-        printBoostAndQueryName(builder);
+        boostAndQueryNameToXContent(builder);
         builder.endObject();
     }
 
@@ -517,9 +516,9 @@ public class PercolateQueryBuilder extends AbstractQueryBuilder<PercolateQueryBu
         final IndexSearcher docSearcher;
         final boolean excludeNestedDocuments;
         if (docs.size() > 1 || docs.get(0).docs().size() > 1) {
-            assert docs.size() != 1 || context.hasNested();
+            assert docs.size() != 1 || context.nestedLookup() != NestedLookup.EMPTY;
             docSearcher = createMultiDocumentSearcher(analyzer, docs);
-            excludeNestedDocuments = context.hasNested()
+            excludeNestedDocuments = context.nestedLookup() != NestedLookup.EMPTY
                 && docs.stream().map(ParsedDocument::docs).mapToInt(List::size).anyMatch(size -> size > 1);
         } else {
             MemoryIndex memoryIndex = MemoryIndex.fromDocument(docs.get(0).rootDoc(), analyzer, true, false);
@@ -532,7 +531,6 @@ public class PercolateQueryBuilder extends AbstractQueryBuilder<PercolateQueryBu
         String queryName = this.name != null ? this.name : pft.name();
         SearchExecutionContext percolateShardContext = wrap(context);
         PercolatorFieldMapper.configureContext(percolateShardContext, pft.mapUnmappedFieldsAsText);
-        ;
         PercolateQuery.QueryStore queryStore = createStore(pft.queryBuilderField, percolateShardContext);
 
         return pft.percolateQuery(queryName, queryStore, documents, docSearcher, excludeNestedDocuments, context.indexVersionCreated());
@@ -642,12 +640,27 @@ public class PercolateQueryBuilder extends AbstractQueryBuilder<PercolateQueryBu
 
             @Override
             @SuppressWarnings("unchecked")
-            public <IFD extends IndexFieldData<?>> IFD getForField(MappedFieldType fieldType) {
-                IndexFieldData.Builder builder = fieldType.fielddataBuilder(delegate.getFullyQualifiedIndex().getName(), delegate::lookup);
+            public <IFD extends IndexFieldData<?>> IFD getForField(
+                MappedFieldType fieldType,
+                MappedFieldType.FielddataOperation fielddataOperation
+            ) {
+                IndexFieldData.Builder builder = fieldType.fielddataBuilder(
+                    new FieldDataContext(
+                        delegate.getFullyQualifiedIndex().getName(),
+                        delegate::lookup,
+                        this::sourcePath,
+                        fielddataOperation
+                    )
+                );
                 IndexFieldDataCache cache = new IndexFieldDataCache.None();
                 CircuitBreakerService circuitBreaker = new NoneCircuitBreakerService();
                 return (IFD) builder.build(cache, circuitBreaker);
             }
         };
+    }
+
+    @Override
+    public Version getMinimalSupportedVersion() {
+        return Version.V_EMPTY;
     }
 }

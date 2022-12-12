@@ -15,8 +15,8 @@ import org.elasticsearch.common.io.stream.BytesStreamOutput;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.test.ESTestCase;
 import org.elasticsearch.test.TestMatchers;
-import org.elasticsearch.xcontent.NamedXContentRegistry;
 import org.elasticsearch.xcontent.XContentParser;
+import org.elasticsearch.xcontent.XContentParserConfiguration;
 import org.elasticsearch.xcontent.XContentType;
 import org.hamcrest.Matchers;
 
@@ -25,7 +25,6 @@ import java.nio.charset.StandardCharsets;
 import java.util.concurrent.TimeUnit;
 
 import static org.elasticsearch.test.TestMatchers.throwableWithMessage;
-import static org.elasticsearch.xcontent.DeprecationHandler.THROW_UNSUPPORTED_OPERATION;
 import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.CoreMatchers.instanceOf;
@@ -171,7 +170,7 @@ public class LicenseTests extends ESTestCase {
                 )
                 .build();
             XContentParser parser = XContentType.JSON.xContent()
-                .createParser(NamedXContentRegistry.EMPTY, THROW_UNSUPPORTED_OPERATION, Strings.toString(license1));
+                .createParser(XContentParserConfiguration.EMPTY, Strings.toString(license1));
             License license2 = License.fromXContent(parser);
             assertThat(license2, notNullValue());
             assertThat(license2.type(), equalTo(type.getTypeName()));
@@ -253,7 +252,7 @@ public class LicenseTests extends ESTestCase {
 
     public void testMalformedSignatureFromXContent() throws Exception {
 
-        String licenseString = """
+        String licenseString = formatted("""
             {
               "license": {
                 "uid": "4056779d-b823-4c12-a9cb-efa4a8d8c422",
@@ -265,7 +264,7 @@ public class LicenseTests extends ESTestCase {
                 "issuer": "elasticsearch",
                 "signature": "%s"
               }
-            }""".formatted(randomAlphaOfLength(10));
+            }""", randomAlphaOfLength(10));
         ElasticsearchException exception = expectThrows(
             ElasticsearchException.class,
             () -> { License.fromSource(new BytesArray(licenseString.getBytes(StandardCharsets.UTF_8)), XContentType.JSON); }

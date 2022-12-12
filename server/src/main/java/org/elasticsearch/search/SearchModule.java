@@ -18,6 +18,7 @@ import org.elasticsearch.common.settings.Setting;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.core.Nullable;
 import org.elasticsearch.core.RestApiVersion;
+import org.elasticsearch.index.query.AbstractQueryBuilder;
 import org.elasticsearch.index.query.BoolQueryBuilder;
 import org.elasticsearch.index.query.BoostingQueryBuilder;
 import org.elasticsearch.index.query.CombinedFieldsQueryBuilder;
@@ -90,8 +91,6 @@ import org.elasticsearch.search.aggregations.AggregationBuilder;
 import org.elasticsearch.search.aggregations.BaseAggregationBuilder;
 import org.elasticsearch.search.aggregations.InternalAggregation;
 import org.elasticsearch.search.aggregations.PipelineAggregationBuilder;
-import org.elasticsearch.search.aggregations.bucket.adjacency.AdjacencyMatrixAggregationBuilder;
-import org.elasticsearch.search.aggregations.bucket.adjacency.InternalAdjacencyMatrix;
 import org.elasticsearch.search.aggregations.bucket.composite.CompositeAggregationBuilder;
 import org.elasticsearch.search.aggregations.bucket.composite.InternalComposite;
 import org.elasticsearch.search.aggregations.bucket.filter.FilterAggregationBuilder;
@@ -104,10 +103,8 @@ import org.elasticsearch.search.aggregations.bucket.geogrid.InternalGeoHashGrid;
 import org.elasticsearch.search.aggregations.bucket.geogrid.InternalGeoTileGrid;
 import org.elasticsearch.search.aggregations.bucket.global.GlobalAggregationBuilder;
 import org.elasticsearch.search.aggregations.bucket.global.InternalGlobal;
-import org.elasticsearch.search.aggregations.bucket.histogram.AutoDateHistogramAggregationBuilder;
 import org.elasticsearch.search.aggregations.bucket.histogram.DateHistogramAggregationBuilder;
 import org.elasticsearch.search.aggregations.bucket.histogram.HistogramAggregationBuilder;
-import org.elasticsearch.search.aggregations.bucket.histogram.InternalAutoDateHistogram;
 import org.elasticsearch.search.aggregations.bucket.histogram.InternalDateHistogram;
 import org.elasticsearch.search.aggregations.bucket.histogram.InternalHistogram;
 import org.elasticsearch.search.aggregations.bucket.histogram.InternalVariableWidthHistogram;
@@ -118,6 +115,8 @@ import org.elasticsearch.search.aggregations.bucket.nested.InternalNested;
 import org.elasticsearch.search.aggregations.bucket.nested.InternalReverseNested;
 import org.elasticsearch.search.aggregations.bucket.nested.NestedAggregationBuilder;
 import org.elasticsearch.search.aggregations.bucket.nested.ReverseNestedAggregationBuilder;
+import org.elasticsearch.search.aggregations.bucket.prefix.InternalIpPrefix;
+import org.elasticsearch.search.aggregations.bucket.prefix.IpPrefixAggregationBuilder;
 import org.elasticsearch.search.aggregations.bucket.range.DateRangeAggregationBuilder;
 import org.elasticsearch.search.aggregations.bucket.range.GeoDistanceAggregationBuilder;
 import org.elasticsearch.search.aggregations.bucket.range.InternalBinaryRange;
@@ -130,6 +129,8 @@ import org.elasticsearch.search.aggregations.bucket.sampler.DiversifiedAggregati
 import org.elasticsearch.search.aggregations.bucket.sampler.InternalSampler;
 import org.elasticsearch.search.aggregations.bucket.sampler.SamplerAggregationBuilder;
 import org.elasticsearch.search.aggregations.bucket.sampler.UnmappedSampler;
+import org.elasticsearch.search.aggregations.bucket.sampler.random.InternalRandomSampler;
+import org.elasticsearch.search.aggregations.bucket.sampler.random.RandomSamplerAggregationBuilder;
 import org.elasticsearch.search.aggregations.bucket.terms.DoubleTerms;
 import org.elasticsearch.search.aggregations.bucket.terms.LongRareTerms;
 import org.elasticsearch.search.aggregations.bucket.terms.LongTerms;
@@ -163,45 +164,41 @@ import org.elasticsearch.search.aggregations.metrics.InternalGeoBounds;
 import org.elasticsearch.search.aggregations.metrics.InternalGeoCentroid;
 import org.elasticsearch.search.aggregations.metrics.InternalHDRPercentileRanks;
 import org.elasticsearch.search.aggregations.metrics.InternalHDRPercentiles;
-import org.elasticsearch.search.aggregations.metrics.InternalMax;
 import org.elasticsearch.search.aggregations.metrics.InternalMedianAbsoluteDeviation;
-import org.elasticsearch.search.aggregations.metrics.InternalMin;
 import org.elasticsearch.search.aggregations.metrics.InternalScriptedMetric;
 import org.elasticsearch.search.aggregations.metrics.InternalStats;
-import org.elasticsearch.search.aggregations.metrics.InternalSum;
 import org.elasticsearch.search.aggregations.metrics.InternalTDigestPercentileRanks;
 import org.elasticsearch.search.aggregations.metrics.InternalTDigestPercentiles;
 import org.elasticsearch.search.aggregations.metrics.InternalTopHits;
 import org.elasticsearch.search.aggregations.metrics.InternalValueCount;
 import org.elasticsearch.search.aggregations.metrics.InternalWeightedAvg;
+import org.elasticsearch.search.aggregations.metrics.Max;
 import org.elasticsearch.search.aggregations.metrics.MaxAggregationBuilder;
 import org.elasticsearch.search.aggregations.metrics.MedianAbsoluteDeviationAggregationBuilder;
+import org.elasticsearch.search.aggregations.metrics.Min;
 import org.elasticsearch.search.aggregations.metrics.MinAggregationBuilder;
 import org.elasticsearch.search.aggregations.metrics.PercentileRanksAggregationBuilder;
 import org.elasticsearch.search.aggregations.metrics.PercentilesAggregationBuilder;
 import org.elasticsearch.search.aggregations.metrics.ScriptedMetricAggregationBuilder;
 import org.elasticsearch.search.aggregations.metrics.StatsAggregationBuilder;
+import org.elasticsearch.search.aggregations.metrics.Sum;
 import org.elasticsearch.search.aggregations.metrics.SumAggregationBuilder;
 import org.elasticsearch.search.aggregations.metrics.TopHitsAggregationBuilder;
 import org.elasticsearch.search.aggregations.metrics.ValueCountAggregationBuilder;
 import org.elasticsearch.search.aggregations.metrics.WeightedAvgAggregationBuilder;
 import org.elasticsearch.search.aggregations.pipeline.AvgBucketPipelineAggregationBuilder;
 import org.elasticsearch.search.aggregations.pipeline.BucketScriptPipelineAggregationBuilder;
-import org.elasticsearch.search.aggregations.pipeline.BucketSelectorPipelineAggregationBuilder;
-import org.elasticsearch.search.aggregations.pipeline.BucketSortPipelineAggregationBuilder;
 import org.elasticsearch.search.aggregations.pipeline.CumulativeSumPipelineAggregationBuilder;
-import org.elasticsearch.search.aggregations.pipeline.DerivativePipelineAggregationBuilder;
 import org.elasticsearch.search.aggregations.pipeline.ExtendedStatsBucketParser;
 import org.elasticsearch.search.aggregations.pipeline.ExtendedStatsBucketPipelineAggregationBuilder;
 import org.elasticsearch.search.aggregations.pipeline.InternalBucketMetricValue;
-import org.elasticsearch.search.aggregations.pipeline.InternalDerivative;
 import org.elasticsearch.search.aggregations.pipeline.InternalExtendedStatsBucket;
 import org.elasticsearch.search.aggregations.pipeline.InternalPercentilesBucket;
 import org.elasticsearch.search.aggregations.pipeline.InternalSimpleValue;
 import org.elasticsearch.search.aggregations.pipeline.InternalStatsBucket;
 import org.elasticsearch.search.aggregations.pipeline.MaxBucketPipelineAggregationBuilder;
 import org.elasticsearch.search.aggregations.pipeline.MinBucketPipelineAggregationBuilder;
-import org.elasticsearch.search.aggregations.pipeline.MovFnPipelineAggregationBuilder;
+import org.elasticsearch.search.aggregations.pipeline.MovAvgPipelineAggregationBuilder;
 import org.elasticsearch.search.aggregations.pipeline.PercentilesBucketPipelineAggregationBuilder;
 import org.elasticsearch.search.aggregations.pipeline.SerialDiffPipelineAggregationBuilder;
 import org.elasticsearch.search.aggregations.pipeline.StatsBucketPipelineAggregationBuilder;
@@ -218,6 +215,7 @@ import org.elasticsearch.search.fetch.subphase.FetchVersionPhase;
 import org.elasticsearch.search.fetch.subphase.MatchedQueriesPhase;
 import org.elasticsearch.search.fetch.subphase.ScriptFieldsPhase;
 import org.elasticsearch.search.fetch.subphase.SeqNoPrimaryTermPhase;
+import org.elasticsearch.search.fetch.subphase.StoredFieldsPhase;
 import org.elasticsearch.search.fetch.subphase.highlight.FastVectorHighlighter;
 import org.elasticsearch.search.fetch.subphase.highlight.HighlightPhase;
 import org.elasticsearch.search.fetch.subphase.highlight.Highlighter;
@@ -244,6 +242,8 @@ import org.elasticsearch.search.suggest.phrase.SmoothingModel;
 import org.elasticsearch.search.suggest.phrase.StupidBackoff;
 import org.elasticsearch.search.suggest.term.TermSuggestion;
 import org.elasticsearch.search.suggest.term.TermSuggestionBuilder;
+import org.elasticsearch.search.vectors.KnnScoreDocQueryBuilder;
+import org.elasticsearch.search.vectors.KnnVectorQueryBuilder;
 import org.elasticsearch.xcontent.NamedXContentRegistry;
 import org.elasticsearch.xcontent.ParseField;
 import org.elasticsearch.xcontent.XContentParser;
@@ -273,7 +273,7 @@ public class SearchModule {
 
     public static final Setting<Integer> INDICES_MAX_NESTED_DEPTH_SETTING = Setting.intSetting(
         "indices.query.bool.max_nested_depth",
-        20,
+        30,
         1,
         Integer.MAX_VALUE,
         Setting.Property.NodeScope
@@ -357,19 +357,19 @@ public class SearchModule {
         );
         registerAggregation(
             new AggregationSpec(SumAggregationBuilder.NAME, SumAggregationBuilder::new, SumAggregationBuilder.PARSER).addResultReader(
-                InternalSum::new
+                Sum::new
             ).setAggregatorRegistrar(SumAggregationBuilder::registerAggregators),
             builder
         );
         registerAggregation(
             new AggregationSpec(MinAggregationBuilder.NAME, MinAggregationBuilder::new, MinAggregationBuilder.PARSER).addResultReader(
-                InternalMin::new
+                Min::new
             ).setAggregatorRegistrar(MinAggregationBuilder::registerAggregators),
             builder
         );
         registerAggregation(
             new AggregationSpec(MaxAggregationBuilder.NAME, MaxAggregationBuilder::new, MaxAggregationBuilder.PARSER).addResultReader(
-                InternalMax::new
+                Max::new
             ).setAggregatorRegistrar(MaxAggregationBuilder::registerAggregators),
             builder
         );
@@ -453,10 +453,11 @@ public class SearchModule {
         );
         registerAggregation(
             new AggregationSpec(
-                AdjacencyMatrixAggregationBuilder.NAME,
-                AdjacencyMatrixAggregationBuilder::new,
-                AdjacencyMatrixAggregationBuilder::parse
-            ).addResultReader(InternalAdjacencyMatrix::new),
+                RandomSamplerAggregationBuilder.NAME,
+                RandomSamplerAggregationBuilder::new,
+                RandomSamplerAggregationBuilder.PARSER
+            ).addResultReader(InternalRandomSampler.NAME, InternalRandomSampler::new)
+                .setAggregatorRegistrar(s -> s.registerUsage(RandomSamplerAggregationBuilder.NAME)),
             builder
         );
         registerAggregation(
@@ -525,6 +526,12 @@ public class SearchModule {
             builder
         );
         registerAggregation(
+            new AggregationSpec(IpPrefixAggregationBuilder.NAME, IpPrefixAggregationBuilder::new, IpPrefixAggregationBuilder.PARSER)
+                .addResultReader(InternalIpPrefix::new)
+                .setAggregatorRegistrar(IpPrefixAggregationBuilder::registerAggregators),
+            builder
+        );
+        registerAggregation(
             new AggregationSpec(IpRangeAggregationBuilder.NAME, IpRangeAggregationBuilder::new, IpRangeAggregationBuilder.PARSER)
                 .addResultReader(InternalBinaryRange::new)
                 .setAggregatorRegistrar(IpRangeAggregationBuilder::registerAggregators),
@@ -542,15 +549,6 @@ public class SearchModule {
                 DateHistogramAggregationBuilder::new,
                 DateHistogramAggregationBuilder.PARSER
             ).addResultReader(InternalDateHistogram::new).setAggregatorRegistrar(DateHistogramAggregationBuilder::registerAggregators),
-            builder
-        );
-        registerAggregation(
-            new AggregationSpec(
-                AutoDateHistogramAggregationBuilder.NAME,
-                AutoDateHistogramAggregationBuilder::new,
-                AutoDateHistogramAggregationBuilder.PARSER
-            ).addResultReader(InternalAutoDateHistogram::new)
-                .setAggregatorRegistrar(AutoDateHistogramAggregationBuilder::registerAggregators),
             builder
         );
         registerAggregation(
@@ -632,7 +630,6 @@ public class SearchModule {
                 .setAggregatorRegistrar(CompositeAggregationBuilder::registerAggregators),
             builder
         );
-
         if (RestApiVersion.minimumSupported() == RestApiVersion.V_7) {
             registerQuery(
                 new QuerySpec<>(
@@ -679,13 +676,6 @@ public class SearchModule {
     }
 
     private void registerPipelineAggregations(List<SearchPlugin> plugins) {
-        registerPipelineAggregation(
-            new PipelineAggregationSpec(
-                DerivativePipelineAggregationBuilder.NAME,
-                DerivativePipelineAggregationBuilder::new,
-                DerivativePipelineAggregationBuilder::parse
-            ).addResultReader(InternalDerivative::new)
-        );
         registerPipelineAggregation(
             new PipelineAggregationSpec(
                 MaxBucketPipelineAggregationBuilder.NAME,
@@ -757,32 +747,20 @@ public class SearchModule {
         );
         registerPipelineAggregation(
             new PipelineAggregationSpec(
-                BucketSelectorPipelineAggregationBuilder.NAME,
-                BucketSelectorPipelineAggregationBuilder::new,
-                BucketSelectorPipelineAggregationBuilder::parse
-            )
-        );
-        registerPipelineAggregation(
-            new PipelineAggregationSpec(
-                BucketSortPipelineAggregationBuilder.NAME,
-                BucketSortPipelineAggregationBuilder::new,
-                BucketSortPipelineAggregationBuilder::parse
-            )
-        );
-        registerPipelineAggregation(
-            new PipelineAggregationSpec(
                 SerialDiffPipelineAggregationBuilder.NAME,
                 SerialDiffPipelineAggregationBuilder::new,
                 SerialDiffPipelineAggregationBuilder::parse
             )
         );
-        registerPipelineAggregation(
-            new PipelineAggregationSpec(
-                MovFnPipelineAggregationBuilder.NAME,
-                MovFnPipelineAggregationBuilder::new,
-                MovFnPipelineAggregationBuilder.PARSER
-            )
-        );
+        if (RestApiVersion.minimumSupported() == RestApiVersion.V_7) {
+            registerPipelineAggregation(
+                new PipelineAggregationSpec(
+                    MovAvgPipelineAggregationBuilder.NAME_V7,
+                    MovAvgPipelineAggregationBuilder::new,
+                    MovAvgPipelineAggregationBuilder.PARSER
+                )
+            );
+        }
 
         registerFromPlugin(plugins, SearchPlugin::getPipelineAggregations, this::registerPipelineAggregation);
     }
@@ -818,7 +796,7 @@ public class SearchModule {
         namedWriteables.add(new NamedWriteableRegistry.Entry(SortBuilder.class, FieldSortBuilder.NAME, FieldSortBuilder::new));
     }
 
-    private <T> void registerFromPlugin(List<SearchPlugin> plugins, Function<SearchPlugin, List<T>> producer, Consumer<T> consumer) {
+    private static <T> void registerFromPlugin(List<SearchPlugin> plugins, Function<SearchPlugin, List<T>> producer, Consumer<T> consumer) {
         for (SearchPlugin plugin : plugins) {
             for (T t : producer.apply(plugin)) {
                 consumer.accept(t);
@@ -880,7 +858,7 @@ public class SearchModule {
         );
     }
 
-    private Map<String, Highlighter> setupHighlighters(Settings settings, List<SearchPlugin> plugins) {
+    private static Map<String, Highlighter> setupHighlighters(Settings settings, List<SearchPlugin> plugins) {
         NamedRegistry<Highlighter> highlighters = new NamedRegistry<>("highlighter");
         highlighters.register("fvh", new FastVectorHighlighter(settings));
         highlighters.register("plain", new PlainHighlighter());
@@ -1004,6 +982,7 @@ public class SearchModule {
 
     private void registerFetchSubPhases(List<SearchPlugin> plugins) {
         registerFetchSubPhase(new ExplainPhase());
+        registerFetchSubPhase(new StoredFieldsPhase());
         registerFetchSubPhase(new FetchDocValuesPhase());
         registerFetchSubPhase(new ScriptFieldsPhase());
         registerFetchSubPhase(new FetchSourcePhase());
@@ -1055,8 +1034,8 @@ public class SearchModule {
         registerQuery(new QuerySpec<>(MatchAllQueryBuilder.NAME, MatchAllQueryBuilder::new, MatchAllQueryBuilder::fromXContent));
         registerQuery(new QuerySpec<>(QueryStringQueryBuilder.NAME, QueryStringQueryBuilder::new, QueryStringQueryBuilder::fromXContent));
         registerQuery(new QuerySpec<>(BoostingQueryBuilder.NAME, BoostingQueryBuilder::new, BoostingQueryBuilder::fromXContent));
-        registerBoolQuery(new ParseField(BoolQueryBuilder.NAME), BoolQueryBuilder::new);
-        BoolQueryBuilder.setMaxNestedDepth(INDICES_MAX_NESTED_DEPTH_SETTING.get(settings));
+        registerQuery(new QuerySpec<>(BoolQueryBuilder.NAME, BoolQueryBuilder::new, BoolQueryBuilder::fromXContent));
+        AbstractQueryBuilder.setMaxNestedDepth(INDICES_MAX_NESTED_DEPTH_SETTING.get(settings));
         registerQuery(new QuerySpec<>(TermQueryBuilder.NAME, TermQueryBuilder::new, TermQueryBuilder::fromXContent));
         registerQuery(new QuerySpec<>(TermsQueryBuilder.NAME, TermsQueryBuilder::new, TermsQueryBuilder::fromXContent));
         registerQuery(new QuerySpec<>(FuzzyQueryBuilder.NAME, FuzzyQueryBuilder::new, FuzzyQueryBuilder::fromXContent));
@@ -1122,6 +1101,24 @@ public class SearchModule {
         );
         registerQuery(new QuerySpec<>(GeoShapeQueryBuilder.NAME, GeoShapeQueryBuilder::new, GeoShapeQueryBuilder::fromXContent));
 
+        registerQuery(
+            new QuerySpec<>(
+                KnnVectorQueryBuilder.NAME,
+                KnnVectorQueryBuilder::new,
+                parser -> {
+                    throw new IllegalArgumentException("[knn] queries cannot be provided directly, use the [knn] body parameter instead");
+                }
+            )
+        );
+
+        registerQuery(
+            new QuerySpec<>(
+                KnnScoreDocQueryBuilder.NAME,
+                KnnScoreDocQueryBuilder::new,
+                parser -> { throw new IllegalArgumentException("[score_doc] queries cannot be provided directly"); }
+            )
+        );
+
         registerFromPlugin(plugins, SearchPlugin::getQueries, this::registerQuery);
 
         if (RestApiVersion.minimumSupported() == RestApiVersion.V_7) {
@@ -1133,7 +1130,7 @@ public class SearchModule {
         namedWriteables.addAll(getIntervalsSourceProviderNamedWritables());
     }
 
-    private CheckedBiConsumer<ShardSearchRequest, StreamOutput, IOException> registerRequestCacheKeyDifferentiator(
+    private static CheckedBiConsumer<ShardSearchRequest, StreamOutput, IOException> registerRequestCacheKeyDifferentiator(
         List<SearchPlugin> plugins
     ) {
         CheckedBiConsumer<ShardSearchRequest, StreamOutput, IOException> differentiator = null;
@@ -1194,13 +1191,6 @@ public class SearchModule {
                 (p, c) -> spec.getParser().fromXContent(p),
                 spec.getName().getForRestApiVersion()
             )
-        );
-    }
-
-    private void registerBoolQuery(ParseField name, Writeable.Reader<QueryBuilder> reader) {
-        namedWriteables.add(new NamedWriteableRegistry.Entry(QueryBuilder.class, name.getPreferredName(), reader));
-        namedXContents.add(
-            new NamedXContentRegistry.Entry(QueryBuilder.class, name, (p, c) -> BoolQueryBuilder.fromXContent(p, (Integer) c))
         );
     }
 

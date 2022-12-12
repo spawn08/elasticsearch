@@ -10,12 +10,12 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.action.support.IndicesOptions;
-import org.elasticsearch.client.node.NodeClient;
+import org.elasticsearch.client.internal.node.NodeClient;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.index.IndexNotFoundException;
 import org.elasticsearch.rest.BaseRestHandler;
-import org.elasticsearch.rest.BytesRestResponse;
 import org.elasticsearch.rest.RestRequest;
+import org.elasticsearch.rest.RestResponse;
 import org.elasticsearch.rest.RestStatus;
 import org.elasticsearch.rest.action.RestCancellableNodeClient;
 import org.elasticsearch.xcontent.XContentBuilder;
@@ -70,7 +70,7 @@ public class RestEqlSearchAction extends BaseRestHandler {
                     try {
                         XContentBuilder builder = channel.newBuilder(request.getXContentType(), XContentType.JSON, true);
                         response.toXContent(builder, request);
-                        channel.sendResponse(new BytesRestResponse(RestStatus.OK, builder));
+                        channel.sendResponse(new RestResponse(RestStatus.OK, builder));
                     } catch (Exception e) {
                         onFailure(e);
                     }
@@ -91,7 +91,7 @@ public class RestEqlSearchAction extends BaseRestHandler {
                         }
                     }
                     try {
-                        channel.sendResponse(new BytesRestResponse(channel, finalException));
+                        channel.sendResponse(new RestResponse(channel, finalException));
                     } catch (Exception inner) {
                         inner.addSuppressed(finalException);
                         logger.error("failed to send failure response", inner);

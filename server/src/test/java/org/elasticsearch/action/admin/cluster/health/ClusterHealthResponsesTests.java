@@ -19,16 +19,16 @@ import org.elasticsearch.common.io.stream.BytesStreamOutput;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.Writeable;
 import org.elasticsearch.common.settings.Settings;
+import org.elasticsearch.common.util.Maps;
 import org.elasticsearch.core.TimeValue;
 import org.elasticsearch.rest.RestStatus;
-import org.elasticsearch.test.AbstractSerializingTestCase;
+import org.elasticsearch.test.AbstractXContentSerializingTestCase;
 import org.elasticsearch.xcontent.ToXContent;
 import org.elasticsearch.xcontent.XContentParser;
 import org.hamcrest.Matchers;
 
 import java.io.IOException;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.function.Predicate;
@@ -39,7 +39,7 @@ import static org.hamcrest.Matchers.greaterThanOrEqualTo;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.lessThanOrEqualTo;
 
-public class ClusterHealthResponsesTests extends AbstractSerializingTestCase<ClusterHealthResponse> {
+public class ClusterHealthResponsesTests extends AbstractXContentSerializingTestCase<ClusterHealthResponse> {
     private final ClusterHealthRequest.Level level = randomFrom(ClusterHealthRequest.Level.values());
 
     public void testIsTimeout() {
@@ -108,7 +108,7 @@ public class ClusterHealthResponsesTests extends AbstractSerializingTestCase<Clu
     @Override
     protected ClusterHealthResponse createTestInstance() {
         int indicesSize = randomInt(20);
-        Map<String, ClusterIndexHealth> indices = new HashMap<>(indicesSize);
+        Map<String, ClusterIndexHealth> indices = Maps.newMapWithExpectedSize(indicesSize);
         if (ClusterHealthRequest.Level.INDICES.equals(level) || ClusterHealthRequest.Level.SHARDS.equals(level)) {
             for (int i = 0; i < indicesSize; i++) {
                 String indexName = randomAlphaOfLengthBetween(1, 5) + i;

@@ -21,11 +21,12 @@ dependencies {
   testImplementation(testArtifact(project(xpackModule('core'))))
   javaRestTestImplementation(project(path: xpackModule('core')))
   javaRestTestImplementation(testArtifact(project(xpackModule('core'))))
+  compileOnly project(path: xpackModule('ilm'))
 }
 
 testClusters.configureEach {
   testDistribution = 'DEFAULT'
   setting 'xpack.security.enabled', 'true'
   setting 'xpack.security.autoconfiguration.enabled', 'false'
-  user username: 'x_pack_rest_user', password: 'x-pack-test-password', role: 'superuser'
+  user username: 'x_pack_rest_user', password: 'x-pack-test-password'
 }

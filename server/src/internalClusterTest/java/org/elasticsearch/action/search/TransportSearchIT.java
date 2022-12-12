@@ -10,6 +10,7 @@ package org.elasticsearch.action.search;
 
 import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.search.ScoreMode;
+import org.elasticsearch.Version;
 import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.action.admin.cluster.node.stats.NodeStats;
 import org.elasticsearch.action.admin.cluster.node.stats.NodesStatsResponse;
@@ -17,7 +18,7 @@ import org.elasticsearch.action.index.IndexRequest;
 import org.elasticsearch.action.index.IndexResponse;
 import org.elasticsearch.action.support.IndicesOptions;
 import org.elasticsearch.action.support.WriteRequest;
-import org.elasticsearch.client.Client;
+import org.elasticsearch.client.internal.Client;
 import org.elasticsearch.cluster.metadata.IndexMetadata;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.breaker.CircuitBreaker;
@@ -38,6 +39,7 @@ import org.elasticsearch.search.DocValueFormat;
 import org.elasticsearch.search.SearchHit;
 import org.elasticsearch.search.aggregations.AbstractAggregationBuilder;
 import org.elasticsearch.search.aggregations.AggregationBuilder;
+import org.elasticsearch.search.aggregations.AggregationExecutionContext;
 import org.elasticsearch.search.aggregations.Aggregations;
 import org.elasticsearch.search.aggregations.Aggregator;
 import org.elasticsearch.search.aggregations.AggregatorBase;
@@ -48,12 +50,13 @@ import org.elasticsearch.search.aggregations.InternalAggregation;
 import org.elasticsearch.search.aggregations.LeafBucketCollector;
 import org.elasticsearch.search.aggregations.bucket.terms.LongTerms;
 import org.elasticsearch.search.aggregations.bucket.terms.TermsAggregationBuilder;
-import org.elasticsearch.search.aggregations.metrics.InternalMax;
+import org.elasticsearch.search.aggregations.metrics.Max;
 import org.elasticsearch.search.aggregations.support.AggregationContext;
 import org.elasticsearch.search.aggregations.support.ValueType;
 import org.elasticsearch.search.builder.SearchSourceBuilder;
 import org.elasticsearch.search.fetch.FetchSubPhase;
 import org.elasticsearch.search.fetch.FetchSubPhaseProcessor;
+import org.elasticsearch.search.fetch.StoredFieldsSpec;
 import org.elasticsearch.tasks.TaskId;
 import org.elasticsearch.test.ESIntegTestCase;
 import org.elasticsearch.xcontent.ObjectParser;
@@ -77,7 +80,7 @@ public class TransportSearchIT extends ESIntegTestCase {
         public List<AggregationSpec> getAggregations() {
             return Collections.singletonList(
                 new AggregationSpec(TestAggregationBuilder.NAME, TestAggregationBuilder::new, TestAggregationBuilder.PARSER)
-                    .addResultReader(InternalMax::new)
+                    .addResultReader(Max::new)
             );
         }
 
@@ -89,6 +92,11 @@ public class TransportSearchIT extends ESIntegTestCase {
             return Collections.singletonList(fetchContext -> new FetchSubPhaseProcessor() {
                 @Override
                 public void setNextReader(LeafReaderContext readerContext) {}
+
+                @Override
+                public StoredFieldsSpec storedFieldsSpec() {
+                    return StoredFieldsSpec.NO_REQUIREMENTS;
+                }
 
                 @Override
                 public void process(FetchSubPhase.HitContext hitContext) {
@@ -644,6 +652,11 @@ public class TransportSearchIT extends ESIntegTestCase {
         public long bytesToPreallocate() {
             return 0;
         }
+
+        @Override
+        public Version getMinimalSupportedVersion() {
+            return Version.V_EMPTY;
+        }
     }
 
     /**
@@ -681,14 +694,14 @@ public class TransportSearchIT extends ESIntegTestCase {
 
         @Override
         public InternalAggregation buildEmptyAggregation() {
-            return new InternalMax(name(), Double.NaN, DocValueFormat.RAW, null);
+            return new Max(name(), Double.NaN, DocValueFormat.RAW, null);
         }
 
         @Override
         public void close() {}
 
         @Override
-        public LeafBucketCollector getLeafCollector(LeafReaderContext ctx) throws IOException {
+        public LeafBucketCollector getLeafCollector(AggregationExecutionContext aggCtx) throws IOException {
             return LeafBucketCollector.NO_OP_COLLECTOR;
         }
 

@@ -11,6 +11,7 @@ package org.elasticsearch.cluster.routing.allocation;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.elasticsearch.Version;
+import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.action.admin.cluster.reroute.ClusterRerouteRequest;
 import org.elasticsearch.action.admin.indices.create.CreateIndexRequest;
 import org.elasticsearch.action.support.ActiveShardCount;
@@ -38,10 +39,8 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.stream.Collectors;
 
 import static org.elasticsearch.cluster.metadata.IndexMetadata.SETTING_NUMBER_OF_REPLICAS;
 import static org.elasticsearch.cluster.metadata.IndexMetadata.SETTING_NUMBER_OF_SHARDS;
@@ -81,7 +80,7 @@ public class FailedNodeRoutingTests extends ESAllocationTestCase {
         clusterState = ClusterState.builder(clusterState)
             .nodes(DiscoveryNodes.builder().add(newNode("node1")).add(newNode("node2")).add(newNode("node3")).add(newNode("node4")))
             .build();
-        clusterState = strategy.reroute(clusterState, "reroute");
+        clusterState = strategy.reroute(clusterState, "reroute", ActionListener.noop());
 
         logger.info("start all the primary shards, replicas will start initializing");
         clusterState = startInitializingShardsAndReroute(strategy, clusterState);
@@ -156,7 +155,7 @@ public class FailedNodeRoutingTests extends ESAllocationTestCase {
         while (keepGoing) {
             List<ShardRouting> primaries = shardsWithState(state.getRoutingNodes(), STARTED).stream()
                 .filter(ShardRouting::primary)
-                .collect(Collectors.toList());
+                .toList();
 
             // Pick a random subset of primaries to fail
             List<FailedShard> shardsToFail = new ArrayList<>();
@@ -196,7 +195,10 @@ public class FailedNodeRoutingTests extends ESAllocationTestCase {
     }
 
     private static Version getNodeVersion(ShardRouting shardRouting, ClusterState state) {
-        return Optional.ofNullable(state.getNodes().get(shardRouting.currentNodeId())).map(DiscoveryNode::getVersion).orElse(null);
+        if (shardRouting.assignedToNode() == false) {
+            return null;
+        }
+        return state.getNodes().get(shardRouting.currentNodeId()).getVersion();
     }
 
     private static final AtomicInteger nodeIdGenerator = new AtomicInteger();
@@ -218,7 +220,7 @@ public class FailedNodeRoutingTests extends ESAllocationTestCase {
     protected DiscoveryNode createNode(DiscoveryNodeRole... mustHaveRoles) {
         Set<DiscoveryNodeRole> roles = new HashSet<>(randomSubsetOf(DiscoveryNodeRole.roles()));
         Collections.addAll(roles, mustHaveRoles);
-        final String id = String.format(Locale.ROOT, "node_%03d", nodeIdGenerator.incrementAndGet());
+        final String id = formatted("node_%03d", nodeIdGenerator.incrementAndGet());
         return new DiscoveryNode(
             id,
             id,

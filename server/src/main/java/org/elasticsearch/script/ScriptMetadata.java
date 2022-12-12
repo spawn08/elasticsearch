@@ -20,8 +20,7 @@ import org.elasticsearch.common.ParsingException;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.common.io.stream.Writeable;
-import org.elasticsearch.xcontent.ToXContentFragment;
-import org.elasticsearch.xcontent.XContentBuilder;
+import org.elasticsearch.xcontent.ToXContent;
 import org.elasticsearch.xcontent.XContentParser;
 import org.elasticsearch.xcontent.XContentParser.Token;
 
@@ -29,13 +28,14 @@ import java.io.IOException;
 import java.util.Collections;
 import java.util.EnumSet;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.Map;
 
 /**
  * {@link ScriptMetadata} is used to store user-defined scripts
  * as part of the {@link ClusterState} using only an id as the key.
  */
-public final class ScriptMetadata implements Metadata.Custom, Writeable, ToXContentFragment {
+public final class ScriptMetadata implements Metadata.Custom, Writeable {
 
     /**
      * Standard logger used to warn about dropped scripts.
@@ -190,17 +190,14 @@ public final class ScriptMetadata implements Metadata.Custom, Writeable, ToXCont
 
         while (token != Token.END_OBJECT) {
             switch (token) {
-                case FIELD_NAME:
-                    id = parser.currentName();
-                    break;
-                case START_OBJECT:
+                case FIELD_NAME -> id = parser.currentName();
+                case START_OBJECT -> {
                     if (id == null) {
                         throw new ParsingException(
                             parser.getTokenLocation(),
                             "unexpected token [" + token + "], expected [<id>, <code>, {]"
                         );
                     }
-
                     StoredScriptSource source = StoredScriptSource.fromXContent(parser, true);
                     // as of 8.0 we drop scripts/templates with an empty source
                     // this check should be removed for the next upgradable version after 8.0
@@ -214,11 +211,12 @@ public final class ScriptMetadata implements Metadata.Custom, Writeable, ToXCont
                     } else {
                         scripts.put(id, source);
                     }
-
                     id = null;
-                    break;
-                default:
-                    throw new ParsingException(parser.getTokenLocation(), "unexpected token [" + token + "], expected [<id>, <code>, {]");
+                }
+                default -> throw new ParsingException(
+                    parser.getTokenLocation(),
+                    "unexpected token [" + token + "], expected [<id>, <code>, {]"
+                );
             }
 
             token = parser.nextToken();
@@ -259,33 +257,15 @@ public final class ScriptMetadata implements Metadata.Custom, Writeable, ToXCont
 
     @Override
     public void writeTo(StreamOutput out) throws IOException {
-        out.writeVInt(scripts.size());
-
-        for (Map.Entry<String, StoredScriptSource> entry : scripts.entrySet()) {
-            out.writeString(entry.getKey());
-            entry.getValue().writeTo(out);
-        }
+        out.writeMap(scripts, StreamOutput::writeString, (o, v) -> v.writeTo(o));
     }
 
-    /**
-     * This will write XContent from {@link ScriptMetadata}.  The following format will be written:
-     *
-     * {@code
-     * {
-     *     "<id>" : "<{@link StoredScriptSource#toXContent(XContentBuilder, Params)}>",
-     *     "<id>" : "<{@link StoredScriptSource#toXContent(XContentBuilder, Params)}>",
-     *     ...
-     * }
-     * }
-     */
     @Override
-    public XContentBuilder toXContent(XContentBuilder builder, Params params) throws IOException {
-        for (Map.Entry<String, StoredScriptSource> entry : scripts.entrySet()) {
+    public Iterator<? extends ToXContent> toXContentChunked(ToXContent.Params ignored) {
+        return scripts.entrySet().stream().map(entry -> (ToXContent) (builder, params) -> {
             builder.field(entry.getKey());
-            entry.getValue().toXContent(builder, params);
-        }
-
-        return builder;
+            return entry.getValue().toXContent(builder, params);
+        }).iterator();
     }
 
     @Override

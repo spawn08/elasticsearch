@@ -19,7 +19,7 @@ import org.elasticsearch.action.TaskOperationFailure;
 import org.elasticsearch.action.support.ActionFilters;
 import org.elasticsearch.action.support.GroupedActionListener;
 import org.elasticsearch.action.support.tasks.TransportTasksAction;
-import org.elasticsearch.client.Client;
+import org.elasticsearch.client.internal.Client;
 import org.elasticsearch.cluster.ClusterState;
 import org.elasticsearch.cluster.node.DiscoveryNodes;
 import org.elasticsearch.cluster.service.ClusterService;
@@ -224,7 +224,7 @@ public class TransportStopTransformAction extends TransportTasksAction<Transform
     }
 
     @Override
-    protected void taskOperation(Request request, TransformTask transformTask, ActionListener<Response> listener) {
+    protected void taskOperation(Task actionTask, Request request, TransformTask transformTask, ActionListener<Response> listener) {
 
         Set<String> ids = request.getExpandedIds();
         if (ids == null) {
@@ -234,7 +234,7 @@ public class TransportStopTransformAction extends TransportTasksAction<Transform
 
         if (ids.contains(transformTask.getTransformId())) {
             // move the call to the generic thread pool, so we do not block the network thread
-            threadPool.executor(ThreadPool.Names.GENERIC).execute(() -> {
+            threadPool.generic().execute(() -> {
                 transformTask.setShouldStopAtCheckpoint(request.isWaitForCheckpoint(), ActionListener.wrap(r -> {
                     try {
                         transformTask.stop(request.isForce(), request.isWaitForCheckpoint());
@@ -242,8 +242,9 @@ public class TransportStopTransformAction extends TransportTasksAction<Transform
                     } catch (ElasticsearchException ex) {
                         listener.onFailure(ex);
                     }
-                },
-                    e -> listener.onFailure(
+                }, e -> {
+                    logger.debug("failure setting should_stop_at_checkpoint", e);
+                    listener.onFailure(
                         new ElasticsearchStatusException(
                             "Failed to update transform task [{}] state value should_stop_at_checkpoint from [{}] to [{}]",
                             RestStatus.CONFLICT,
@@ -252,8 +253,8 @@ public class TransportStopTransformAction extends TransportTasksAction<Transform
                             transformTask.getState().shouldStopAtNextCheckpoint(),
                             request.isWaitForCheckpoint()
                         )
-                    )
-                ));
+                    );
+                }));
             });
         } else {
             listener.onFailure(
@@ -295,6 +296,12 @@ public class TransportStopTransformAction extends TransportTasksAction<Transform
             // If there were failures attempting to stop the tasks, we don't know if they will actually stop.
             // It is better to respond to the user now than allow for the persistent task waiting to timeout
             if (response.getTaskFailures().isEmpty() == false || response.getNodeFailures().isEmpty() == false) {
+                logger.debug(
+                    "[{}] Failure when waiting for transform to stop, task failures: [{}], node failures: [{}]",
+                    request.getId(),
+                    response.getTaskFailures(),
+                    response.getNodeFailures()
+                );
                 RestStatus status = firstNotOKStatus(response.getTaskFailures(), response.getNodeFailures());
                 listener.onFailure(buildException(response.getTaskFailures(), response.getNodeFailures(), status));
                 return;
@@ -315,6 +322,9 @@ public class TransportStopTransformAction extends TransportTasksAction<Transform
             taskOperationFailures.stream().map(TaskOperationFailure::getCause),
             elasticsearchExceptions.stream()
         ).collect(Collectors.toList());
+
+        assert exceptions.size() > 0 : "buildException called, but no exception found";
+        assert exceptions.get(0) != null : "exception must not be null";
 
         ElasticsearchStatusException elasticsearchStatusException = new ElasticsearchStatusException(
             exceptions.get(0).getMessage(),
@@ -473,8 +483,8 @@ public class TransportStopTransformAction extends TransportTasksAction<Transform
     ) {
         final ActionListener<Response> doExecuteListener = ActionListener.wrap(response -> {
             GroupedActionListener<PersistentTask<?>> groupedListener = new GroupedActionListener<>(
-                ActionListener.wrap(r -> { finalListener.onResponse(response); }, finalListener::onFailure),
-                transformNodeAssignments.getWaitingForAssignment().size()
+                transformNodeAssignments.getWaitingForAssignment().size(),
+                ActionListener.wrap(r -> { finalListener.onResponse(response); }, finalListener::onFailure)
             );
 
             for (String unassignedTaskId : transformNodeAssignments.getWaitingForAssignment()) {
@@ -483,8 +493,8 @@ public class TransportStopTransformAction extends TransportTasksAction<Transform
 
         }, e -> {
             GroupedActionListener<PersistentTask<?>> groupedListener = new GroupedActionListener<>(
-                ActionListener.wrap(r -> { finalListener.onFailure(e); }, finalListener::onFailure),
-                transformNodeAssignments.getWaitingForAssignment().size()
+                transformNodeAssignments.getWaitingForAssignment().size(),
+                ActionListener.wrap(r -> { finalListener.onFailure(e); }, finalListener::onFailure)
             );
 
             for (String unassignedTaskId : transformNodeAssignments.getWaitingForAssignment()) {

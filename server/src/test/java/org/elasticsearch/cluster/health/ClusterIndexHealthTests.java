@@ -13,7 +13,7 @@ import org.elasticsearch.cluster.metadata.IndexMetadata;
 import org.elasticsearch.cluster.routing.IndexRoutingTable;
 import org.elasticsearch.cluster.routing.RoutingTableGenerator;
 import org.elasticsearch.common.io.stream.Writeable;
-import org.elasticsearch.test.AbstractSerializingTestCase;
+import org.elasticsearch.test.AbstractXContentSerializingTestCase;
 import org.elasticsearch.xcontent.ToXContent;
 import org.elasticsearch.xcontent.XContentParser;
 
@@ -25,11 +25,10 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.function.Predicate;
 import java.util.regex.Pattern;
-import java.util.stream.Collectors;
 
 import static org.hamcrest.CoreMatchers.equalTo;
 
-public class ClusterIndexHealthTests extends AbstractSerializingTestCase<ClusterIndexHealth> {
+public class ClusterIndexHealthTests extends AbstractXContentSerializingTestCase<ClusterIndexHealth> {
     private final ClusterHealthRequest.Level level = randomFrom(ClusterHealthRequest.Level.SHARDS, ClusterHealthRequest.Level.INDICES);
 
     public void testClusterIndexHealth() {
@@ -244,9 +243,7 @@ public class ClusterIndexHealthTests extends AbstractSerializingTestCase<Cluster
                 );
             case "status":
                 ClusterHealthStatus status = randomFrom(
-                    Arrays.stream(ClusterHealthStatus.values())
-                        .filter(value -> value.equals(instance.getStatus()) == false)
-                        .collect(Collectors.toList())
+                    Arrays.stream(ClusterHealthStatus.values()).filter(value -> value.equals(instance.getStatus()) == false).toList()
                 );
                 return new ClusterIndexHealth(
                     instance.getIndex(),

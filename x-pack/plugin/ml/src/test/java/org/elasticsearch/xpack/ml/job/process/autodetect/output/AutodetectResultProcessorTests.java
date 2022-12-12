@@ -14,7 +14,7 @@ import org.elasticsearch.action.bulk.BulkItemResponse;
 import org.elasticsearch.action.bulk.BulkResponse;
 import org.elasticsearch.action.index.IndexResponse;
 import org.elasticsearch.action.support.WriteRequest;
-import org.elasticsearch.client.Client;
+import org.elasticsearch.client.internal.Client;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.unit.ByteSizeValue;
 import org.elasticsearch.common.util.concurrent.ThreadContext;
@@ -61,7 +61,6 @@ import java.util.Date;
 import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
-import java.util.concurrent.TimeoutException;
 
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.is;
@@ -139,7 +138,7 @@ public class AutodetectResultProcessorTests extends ESTestCase {
         executor.shutdown();
     }
 
-    public void testProcess() throws TimeoutException {
+    public void testProcess() throws Exception {
         AutodetectResult autodetectResult = mock(AutodetectResult.class);
         when(process.readAutodetectResults()).thenReturn(Collections.singletonList(autodetectResult).iterator());
 
@@ -179,6 +178,7 @@ public class AutodetectResultProcessorTests extends ESTestCase {
         when(result.getBucket()).thenReturn(bucket);
 
         processorUnderTest.processResult(result);
+        assertEquals(1L, processorUnderTest.getCurrentRunBucketCount());
         assertFalse(processorUnderTest.isDeleteInterimRequired());
 
         verify(bulkResultsPersister).persistTimingStats(any(TimingStats.class));
@@ -186,6 +186,24 @@ public class AutodetectResultProcessorTests extends ESTestCase {
         verify(bulkResultsPersister).executeRequest();
         verify(persister).bulkPersisterBuilder(eq(JOB_ID));
         verify(persister).deleteInterimResults(JOB_ID);
+    }
+
+    public void testProcessResult_bucket_isInterim() {
+        when(bulkResultsPersister.persistTimingStats(any(TimingStats.class))).thenReturn(bulkResultsPersister);
+        when(bulkResultsPersister.persistBucket(any(Bucket.class))).thenReturn(bulkResultsPersister);
+        AutodetectResult result = mock(AutodetectResult.class);
+        Bucket bucket = new Bucket(JOB_ID, new Date(), BUCKET_SPAN_MS);
+        bucket.setInterim(true);
+        when(result.getBucket()).thenReturn(bucket);
+
+        processorUnderTest.setDeleteInterimRequired(false);
+        processorUnderTest.processResult(result);
+        assertEquals(0L, processorUnderTest.getCurrentRunBucketCount());
+
+        verify(bulkResultsPersister, never()).persistTimingStats(any(TimingStats.class));
+        verify(bulkResultsPersister).persistBucket(bucket);
+        verify(bulkResultsPersister).executeRequest();
+        verify(persister).bulkPersisterBuilder(eq(JOB_ID));
     }
 
     public void testProcessResult_records() {
@@ -439,7 +457,7 @@ public class AutodetectResultProcessorTests extends ESTestCase {
         verify(renormalizer).isEnabled();
     }
 
-    public void testAwaitCompletion() throws TimeoutException {
+    public void testAwaitCompletion() throws Exception {
         AutodetectResult autodetectResult = mock(AutodetectResult.class);
         when(process.readAutodetectResults()).thenReturn(Collections.singletonList(autodetectResult).iterator());
 
@@ -492,7 +510,7 @@ public class AutodetectResultProcessorTests extends ESTestCase {
         verify(persister).bulkPersisterBuilder(eq(JOB_ID));
     }
 
-    public void testKill() throws TimeoutException {
+    public void testKill() throws Exception {
         AutodetectResult autodetectResult = mock(AutodetectResult.class);
         when(process.readAutodetectResults()).thenReturn(Collections.singletonList(autodetectResult).iterator());
 

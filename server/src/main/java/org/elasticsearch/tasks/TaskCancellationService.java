@@ -10,7 +10,6 @@ package org.elasticsearch.tasks;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.apache.logging.log4j.message.ParameterizedMessage;
 import org.elasticsearch.ElasticsearchSecurityException;
 import org.elasticsearch.ExceptionsHelper;
 import org.elasticsearch.Version;
@@ -39,16 +38,19 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Objects;
 
+import static org.elasticsearch.core.Strings.format;
+
 public class TaskCancellationService {
     public static final String BAN_PARENT_ACTION_NAME = "internal:admin/tasks/ban";
     private static final Logger logger = LogManager.getLogger(TaskCancellationService.class);
     private final TransportService transportService;
     private final TaskManager taskManager;
-    private final ResultDeduplicator<CancelRequest, Void> deduplicator = new ResultDeduplicator<>();
+    private final ResultDeduplicator<CancelRequest, Void> deduplicator;
 
     public TaskCancellationService(TransportService transportService) {
         this.transportService = transportService;
         this.taskManager = transportService.getTaskManager();
+        this.deduplicator = new ResultDeduplicator<>(transportService.getThreadPool().getThreadContext());
         transportService.registerRequestHandler(
             BAN_PARENT_ACTION_NAME,
             ThreadPool.Names.SAME,
@@ -93,11 +95,11 @@ public class TaskCancellationService {
     }
 
     void doCancelTaskAndDescendants(CancellableTask task, String reason, boolean waitForCompletion, ActionListener<Void> listener) {
-        final TaskId taskId = task.taskInfo(localNodeId(), false).getTaskId();
+        final TaskId taskId = task.taskInfo(localNodeId(), false).taskId();
         if (task.shouldCancelChildrenOnCancellation()) {
             logger.trace("cancelling task [{}] and its descendants", taskId);
             StepListener<Void> completedListener = new StepListener<>();
-            GroupedActionListener<Void> groupedListener = new GroupedActionListener<>(completedListener.map(r -> null), 3);
+            GroupedActionListener<Void> groupedListener = new GroupedActionListener<>(3, completedListener.map(r -> null));
             Collection<Transport.Connection> childConnections = taskManager.startBanOnChildTasks(task.getId(), reason, () -> {
                 logger.trace("child tasks of parent [{}] are completed", taskId);
                 groupedListener.onResponse(null);
@@ -147,7 +149,7 @@ public class TaskCancellationService {
         }
         final TaskId taskId = new TaskId(localNodeId(), task.getId());
         logger.trace("cancelling child tasks of [{}] on child connections {}", taskId, childConnections);
-        GroupedActionListener<Void> groupedListener = new GroupedActionListener<>(listener.map(r -> null), childConnections.size());
+        GroupedActionListener<Void> groupedListener = new GroupedActionListener<>(childConnections.size(), listener.map(r -> null));
         final BanParentTaskRequest banRequest = BanParentTaskRequest.createSetBanParentTaskRequest(taskId, reason, waitForCompletion);
         for (Transport.Connection connection : childConnections) {
             assert TransportService.unwrapConnection(connection) == connection : "Child connection must be unwrapped";
@@ -169,20 +171,12 @@ public class TaskCancellationService {
                         assert cause instanceof ElasticsearchSecurityException == false;
                         if (isUnimportantBanFailure(cause)) {
                             logger.debug(
-                                new ParameterizedMessage(
-                                    "cannot send ban for tasks with the parent [{}] on connection [{}]",
-                                    taskId,
-                                    connection
-                                ),
+                                () -> format("cannot send ban for tasks with the parent [%s] on connection [%s]", taskId, connection),
                                 exp
                             );
                         } else if (logger.isDebugEnabled()) {
                             logger.warn(
-                                new ParameterizedMessage(
-                                    "cannot send ban for tasks with the parent [{}] on connection [{}]",
-                                    taskId,
-                                    connection
-                                ),
+                                () -> format("cannot send ban for tasks with the parent [%s] on connection [%s]", taskId, connection),
                                 exp
                             );
                         } else {
@@ -218,8 +212,8 @@ public class TaskCancellationService {
                         assert cause instanceof ElasticsearchSecurityException == false;
                         if (isUnimportantBanFailure(cause)) {
                             logger.debug(
-                                new ParameterizedMessage(
-                                    "failed to remove ban for tasks with the parent [{}] on connection [{}]",
+                                () -> format(
+                                    "failed to remove ban for tasks with the parent [%s] on connection [%s]",
                                     request.parentTaskId,
                                     connection
                                 ),
@@ -227,8 +221,8 @@ public class TaskCancellationService {
                             );
                         } else if (logger.isDebugEnabled()) {
                             logger.warn(
-                                new ParameterizedMessage(
-                                    "failed to remove ban for tasks with the parent [{}] on connection [{}]",
+                                () -> format(
+                                    "failed to remove ban for tasks with the parent [%s] on connection [%s]",
                                     request.parentTaskId,
                                     connection
                                 ),
@@ -319,8 +313,8 @@ public class TaskCancellationService {
                 );
                 final List<CancellableTask> childTasks = taskManager.setBan(request.parentTaskId, request.reason, channel);
                 final GroupedActionListener<Void> listener = new GroupedActionListener<>(
-                    new ChannelActionListener<>(channel, BAN_PARENT_ACTION_NAME, request).map(r -> TransportResponse.Empty.INSTANCE),
-                    childTasks.size() + 1
+                    childTasks.size() + 1,
+                    new ChannelActionListener<>(channel, BAN_PARENT_ACTION_NAME, request).map(r -> TransportResponse.Empty.INSTANCE)
                 );
                 for (CancellableTask childTask : childTasks) {
                     cancelTaskAndDescendants(childTask, request.reason, request.waitForCompletion, listener);

@@ -7,7 +7,7 @@
 package org.elasticsearch.xpack.security.action.user;
 
 import org.elasticsearch.ElasticsearchParseException;
-import org.elasticsearch.client.Client;
+import org.elasticsearch.client.internal.Client;
 import org.elasticsearch.common.ValidationException;
 import org.elasticsearch.common.bytes.BytesArray;
 import org.elasticsearch.common.bytes.BytesReference;
@@ -162,11 +162,11 @@ public class PutUserRequestBuilderTests extends ESTestCase {
     public void testWithValidPasswordHash() throws IOException {
         final Hasher hasher = getFastStoredHashAlgoForTests();
         final char[] hash = hasher.hash(new SecureString("secretpassword".toCharArray()));
-        final String json = """
+        final String json = formatted("""
             {
               "password_hash": "%s",
               "roles": []
-            }""".formatted(new String(hash));
+            }""", new String(hash));
 
         PutUserRequestBuilder requestBuilder = new PutUserRequestBuilder(mock(Client.class));
         PutUserRequest request = requestBuilder.source(
@@ -186,11 +186,11 @@ public class PutUserRequestBuilderTests extends ESTestCase {
             userHasher = getFastStoredHashAlgoForTests();
         }
         final char[] hash = userHasher.hash(new SecureString("secretpassword".toCharArray()));
-        final String json = """
+        final String json = formatted("""
             {
               "password_hash": "%s",
               "roles": []
-            }""".formatted(new String(hash));
+            }""", new String(hash));
 
         PutUserRequestBuilder builder = new PutUserRequestBuilder(mock(Client.class));
         final IllegalArgumentException ex = expectThrows(

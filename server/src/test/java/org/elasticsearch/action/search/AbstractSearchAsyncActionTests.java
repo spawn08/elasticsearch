@@ -77,7 +77,7 @@ public class AbstractSearchAsyncActionTests extends ESTestCase {
             logger,
             null,
             nodeIdToConnection,
-            Collections.singletonMap("foo", new AliasFilter(new MatchAllQueryBuilder())),
+            Collections.singletonMap("foo", AliasFilter.of(new MatchAllQueryBuilder())),
             Collections.singletonMap("foo", 2.0f),
             null,
             request,
@@ -196,7 +196,7 @@ public class AbstractSearchAsyncActionTests extends ESTestCase {
                 new IllegalArgumentException()
             );
         }
-        action.sendSearchResponse(InternalSearchResponse.empty(), phaseResults.results);
+        action.sendSearchResponse(InternalSearchResponse.EMPTY_WITH_TOTAL_HITS, phaseResults.results);
         assertThat(exception.get(), instanceOf(SearchPhaseExecutionException.class));
         SearchPhaseExecutionException searchPhaseExecutionException = (SearchPhaseExecutionException) exception.get();
         assertEquals(0, searchPhaseExecutionException.getSuppressed().length);

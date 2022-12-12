@@ -22,7 +22,6 @@ import java.util.Map;
 
 import static org.elasticsearch.action.ValidateActions.addValidationError;
 import static org.elasticsearch.common.settings.Settings.readSettingsFromStream;
-import static org.elasticsearch.common.settings.Settings.writeSettingsToStream;
 
 /**
  * Register repository request.
@@ -187,10 +186,10 @@ public class PutRepositoryRequest extends AcknowledgedRequest<PutRepositoryReque
      */
     public PutRepositoryRequest source(Map<String, Object> repositoryDefinition) {
         for (Map.Entry<String, Object> entry : repositoryDefinition.entrySet()) {
-            String key = entry.getKey();
-            if (key.equals("type")) {
+            String name = entry.getKey();
+            if (name.equals("type")) {
                 type(entry.getValue().toString());
-            } else if (key.equals("settings")) {
+            } else if (name.equals("settings")) {
                 if ((entry.getValue() instanceof Map) == false) {
                     throw new IllegalArgumentException("Malformed settings section, should include an inner object");
                 }
@@ -207,7 +206,7 @@ public class PutRepositoryRequest extends AcknowledgedRequest<PutRepositoryReque
         super.writeTo(out);
         out.writeString(name);
         out.writeString(type);
-        writeSettingsToStream(settings, out);
+        settings.writeTo(out);
         out.writeBoolean(verify);
     }
 

@@ -9,6 +9,7 @@
 package org.elasticsearch.cluster.routing.allocation;
 
 import org.elasticsearch.Version;
+import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.cluster.ClusterName;
 import org.elasticsearch.cluster.ClusterState;
 import org.elasticsearch.cluster.ESAllocationTestCase;
@@ -18,7 +19,7 @@ import org.elasticsearch.cluster.health.ClusterStateHealth;
 import org.elasticsearch.cluster.metadata.IndexMetadata;
 import org.elasticsearch.cluster.metadata.Metadata;
 import org.elasticsearch.cluster.node.DiscoveryNodes;
-import org.elasticsearch.cluster.routing.IndexShardRoutingTable;
+import org.elasticsearch.cluster.routing.IndexRoutingTable;
 import org.elasticsearch.cluster.routing.RoutingNode;
 import org.elasticsearch.cluster.routing.RoutingTable;
 import org.elasticsearch.cluster.routing.ShardRouting;
@@ -82,9 +83,9 @@ public class DecisionsImpactOnClusterHealthTests extends ESAllocationTestCase {
         // if deciders say YES to allocating primary shards, stay in YELLOW state
         ClusterState clusterState = runAllocationTest(settings, indexName, Collections.singleton(decider), ClusterHealthStatus.YELLOW);
         // make sure primaries are initialized
-        RoutingTable routingTable = clusterState.routingTable();
-        for (IndexShardRoutingTable indexShardRoutingTable : routingTable.index(indexName)) {
-            assertTrue(indexShardRoutingTable.primaryShard().initializing());
+        final IndexRoutingTable indexRoutingTable = clusterState.routingTable().index(indexName);
+        for (int i = 0; i < indexRoutingTable.size(); i++) {
+            assertTrue(indexRoutingTable.shard(i).primaryShard().initializing());
         }
     }
 
@@ -122,7 +123,7 @@ public class DecisionsImpactOnClusterHealthTests extends ESAllocationTestCase {
         clusterState = ClusterState.builder(clusterState).nodes(discoveryNodes).build();
 
         logger.info("--> do the reroute");
-        routingTable = allocationService.reroute(clusterState, "reroute").routingTable();
+        routingTable = allocationService.reroute(clusterState, "reroute", ActionListener.noop()).routingTable();
         clusterState = ClusterState.builder(clusterState).routingTable(routingTable).build();
 
         logger.info("--> assert cluster health");

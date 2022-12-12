@@ -15,7 +15,6 @@ import org.elasticsearch.client.Request;
 import org.elasticsearch.client.Response;
 import org.elasticsearch.client.ResponseException;
 import org.elasticsearch.client.RestClient;
-import org.elasticsearch.client.ilm.RolloverAction;
 import org.elasticsearch.cluster.metadata.DataStream;
 import org.elasticsearch.cluster.metadata.Template;
 import org.elasticsearch.common.Strings;
@@ -25,14 +24,14 @@ import org.elasticsearch.common.xcontent.XContentHelper;
 import org.elasticsearch.core.TimeValue;
 import org.elasticsearch.test.junit.annotations.TestIssueLogging;
 import org.elasticsearch.test.rest.ESRestTestCase;
-import org.elasticsearch.xcontent.DeprecationHandler;
-import org.elasticsearch.xcontent.NamedXContentRegistry;
 import org.elasticsearch.xcontent.ToXContent;
 import org.elasticsearch.xcontent.XContentBuilder;
 import org.elasticsearch.xcontent.XContentParser;
+import org.elasticsearch.xcontent.XContentParserConfiguration;
 import org.elasticsearch.xcontent.XContentType;
 import org.elasticsearch.xcontent.json.JsonXContent;
 import org.elasticsearch.xpack.core.ilm.LifecycleSettings;
+import org.elasticsearch.xpack.core.ilm.RolloverAction;
 import org.elasticsearch.xpack.core.ilm.Step;
 import org.elasticsearch.xpack.core.ilm.WaitForRolloverReadyStep;
 import org.elasticsearch.xpack.core.slm.SnapshotLifecyclePolicy;
@@ -67,11 +66,6 @@ import static org.hamcrest.Matchers.startsWith;
 
 public class SnapshotLifecycleRestIT extends ESRestTestCase {
     private static final String NEVER_EXECUTE_CRON_SCHEDULE = "* * * 31 FEB ? *";
-
-    @Override
-    protected boolean waitForAllSnapshotsWiped() {
-        return true;
-    }
 
     // as we are testing the SLM history entries we'll preserve the "slm-history-ilm-policy" policy as it'll be associated with the
     // .slm-history-* indices and we won't be able to delete it when we wipe out the cluster
@@ -108,7 +102,6 @@ public class SnapshotLifecycleRestIT extends ESRestTestCase {
         final String policyName = "full-policy";
         final String repoId = "full-policy-repo";
         int docCount = randomIntBetween(10, 50);
-        List<IndexRequestBuilder> indexReqs = new ArrayList<>();
         for (int i = 0; i < docCount; i++) {
             index(client(), indexName, "" + i, "foo", "bar");
         }
@@ -367,9 +360,7 @@ public class SnapshotLifecycleRestIT extends ESRestTestCase {
 
             assertBusy(() -> {
                 try {
-                    Map<String, List<Map<?, ?>>> snaps = wipeSnapshots();
-                    logger.info("--> checking for wiped snapshots: {}", snaps);
-                    assertThat(snaps.size(), equalTo(0));
+                    wipeSnapshots();
                 } catch (ResponseException e) {
                     logger.error("got exception wiping snapshots", e);
                     fail("got exception: " + EntityUtils.toString(e.getResponse().getEntity()));
@@ -605,8 +596,7 @@ public class SnapshotLifecycleRestIT extends ESRestTestCase {
             Response executeRepsonse = client().performRequest(new Request("GET", path));
             try (
                 XContentParser parser = JsonXContent.jsonXContent.createParser(
-                    NamedXContentRegistry.EMPTY,
-                    DeprecationHandler.THROW_UNSUPPORTED_OPERATION,
+                    XContentParserConfiguration.EMPTY,
                     EntityUtils.toByteArray(executeRepsonse.getEntity())
                 )
             ) {
@@ -626,8 +616,7 @@ public class SnapshotLifecycleRestIT extends ESRestTestCase {
             Response executeRepsonse = client().performRequest(new Request("POST", "/_slm/policy/" + policyId + "/_execute"));
             try (
                 XContentParser parser = JsonXContent.jsonXContent.createParser(
-                    NamedXContentRegistry.EMPTY,
-                    DeprecationHandler.THROW_UNSUPPORTED_OPERATION,
+                    XContentParserConfiguration.EMPTY,
                     EntityUtils.toByteArray(executeRepsonse.getEntity())
                 )
             ) {
@@ -669,7 +658,7 @@ public class SnapshotLifecycleRestIT extends ESRestTestCase {
     @SuppressWarnings("unchecked")
     private void assertHistoryIsPresent(String policyName, boolean success, String repository, String operation) throws IOException {
         final Request historySearchRequest = new Request("GET", ".slm-history*/_search");
-        historySearchRequest.setJsonEntity("""
+        historySearchRequest.setJsonEntity(formatted("""
             {
               "query": {
                 "bool": {
@@ -697,7 +686,7 @@ public class SnapshotLifecycleRestIT extends ESRestTestCase {
                   ]
                 }
               }
-            }""".formatted(policyName, success, repository, operation));
+            }""", policyName, success, repository, operation));
         Response historyResponse;
         try {
             historyResponse = client().performRequest(historySearchRequest);
@@ -719,11 +708,20 @@ public class SnapshotLifecycleRestIT extends ESRestTestCase {
         assertHistoryIndexWaitingForRollover();
     }
 
+    @SuppressWarnings("unchecked")
     private void assertHistoryIndexWaitingForRollover() throws IOException {
-        Step.StepKey stepKey = getStepKeyForIndex(client(), DataStream.getDefaultBackingIndexName(SLM_HISTORY_DATA_STREAM, 1));
-        assertEquals("hot", stepKey.getPhase());
-        assertEquals(RolloverAction.NAME, stepKey.getAction());
-        assertEquals(WaitForRolloverReadyStep.NAME, stepKey.getName());
+        Response response = client().performRequest(new Request("GET", "/_data_stream/" + SLM_HISTORY_DATA_STREAM));
+        assertOK(response);
+        List<Object> dataStreams = (List<Object>) entityAsMap(response).get("data_streams");
+        assertEquals(1, dataStreams.size());
+        Map<String, Object> ds = (Map<String, Object>) dataStreams.get(0);
+        List<Map<String, String>> indices = (List<Map<String, String>>) ds.get("indices");
+        assertEquals(1, indices.size());
+
+        Step.StepKey stepKey = getStepKeyForIndex(client(), indices.get(0).get("index_name"));
+        assertEquals("hot", stepKey.phase());
+        assertEquals(RolloverAction.NAME, stepKey.action());
+        assertEquals(WaitForRolloverReadyStep.NAME, stepKey.name());
     }
 
     private void createSnapshotPolicy(

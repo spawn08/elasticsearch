@@ -13,16 +13,16 @@ import org.elasticsearch.gradle.internal.info.BuildParams;
 import org.elasticsearch.gradle.internal.info.GlobalBuildInfoPlugin;
 import org.gradle.api.Action;
 import org.gradle.api.InvalidUserDataException;
+import org.gradle.api.Plugin;
 import org.gradle.api.Project;
 import org.gradle.api.Task;
 import org.gradle.api.provider.Provider;
 import org.gradle.api.provider.ProviderFactory;
-import org.gradle.api.services.BuildService;
-import org.gradle.api.services.BuildServiceParameters;
 import org.gradle.api.tasks.TaskProvider;
 import org.gradle.language.base.plugins.LifecycleBasePlugin;
 
 import java.io.File;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -40,9 +40,8 @@ import static java.util.Arrays.stream;
  * unreleased versions are when Gradle projects are set up, so we use "build-unreleased-version-*" as placeholders
  * and configure them to build various versions here.
  */
-public class InternalDistributionBwcSetupPlugin implements InternalPlugin {
+public class InternalDistributionBwcSetupPlugin implements Plugin<Project> {
 
-    private static final String BWC_TASK_THROTTLE_SERVICE = "bwcTaskThrottle";
     private ProviderFactory providerFactory;
 
     @Inject
@@ -53,30 +52,23 @@ public class InternalDistributionBwcSetupPlugin implements InternalPlugin {
     @Override
     public void apply(Project project) {
         project.getRootProject().getPluginManager().apply(GlobalBuildInfoPlugin.class);
-        Provider<BwcTaskThrottle> bwcTaskThrottleProvider = project.getGradle()
-            .getSharedServices()
-            .registerIfAbsent(BWC_TASK_THROTTLE_SERVICE, BwcTaskThrottle.class, spec -> spec.getMaxParallelUsages().set(1));
         BuildParams.getBwcVersions()
             .forPreviousUnreleased(
                 (BwcVersions.UnreleasedVersionInfo unreleasedVersion) -> {
-                    configureBwcProject(project.project(unreleasedVersion.gradleProjectPath), unreleasedVersion, bwcTaskThrottleProvider);
+                    configureBwcProject(project.project(unreleasedVersion.gradleProjectPath()), unreleasedVersion);
                 }
             );
     }
 
-    private void configureBwcProject(
-        Project project,
-        BwcVersions.UnreleasedVersionInfo versionInfo,
-        Provider<BwcTaskThrottle> bwcTaskThrottleProvider
-    ) {
+    private void configureBwcProject(Project project, BwcVersions.UnreleasedVersionInfo versionInfo) {
         Provider<BwcVersions.UnreleasedVersionInfo> versionInfoProvider = providerFactory.provider(() -> versionInfo);
-        Provider<File> checkoutDir = versionInfoProvider.map(info -> new File(project.getBuildDir(), "bwc/checkout-" + info.branch));
+        Provider<File> checkoutDir = versionInfoProvider.map(info -> new File(project.getBuildDir(), "bwc/checkout-" + info.branch()));
         BwcSetupExtension bwcSetupExtension = project.getExtensions()
-            .create("bwcSetup", BwcSetupExtension.class, project, versionInfoProvider, bwcTaskThrottleProvider, checkoutDir);
+            .create("bwcSetup", BwcSetupExtension.class, project, versionInfoProvider, checkoutDir);
         BwcGitExtension gitExtension = project.getPlugins().apply(InternalBwcGitPlugin.class).getGitExtension();
-        Provider<Version> bwcVersion = versionInfoProvider.map(info -> info.version);
-        gitExtension.setBwcVersion(versionInfoProvider.map(info -> info.version));
-        gitExtension.setBwcBranch(versionInfoProvider.map(info -> info.branch));
+        Provider<Version> bwcVersion = versionInfoProvider.map(info -> info.version());
+        gitExtension.setBwcVersion(versionInfoProvider.map(info -> info.version()));
+        gitExtension.setBwcBranch(versionInfoProvider.map(info -> info.branch()));
         gitExtension.getCheckoutDir().set(checkoutDir);
 
         // we want basic lifecycle tasks like `clean` here.
@@ -235,21 +227,23 @@ public class InternalDistributionBwcSetupPlugin implements InternalPlugin {
             } else {
                 c.getOutputs().files(expectedOutputFile);
             }
-            c.getOutputs().cacheIf("BWC distribution caching is disabled on 'master' branch", task -> {
+            c.getOutputs().cacheIf("BWC distribution caching is disabled on 'main' branch", task -> {
                 String gitBranch = System.getenv("GIT_BRANCH");
-                return BuildParams.isCi() && (gitBranch == null || gitBranch.endsWith("master") == false);
+                return BuildParams.isCi()
+                    && (gitBranch == null || gitBranch.endsWith("master") == false || gitBranch.endsWith("main") == false);
             });
-            c.args(projectPath.replace('/', ':') + ":" + assembleTaskName);
+            c.getArgs().add(projectPath.replace('/', ':') + ":" + assembleTaskName);
             if (project.getGradle().getStartParameter().isBuildCacheEnabled()) {
-                c.args("--build-cache");
+                c.getArgs().add("--build-cache");
             }
             c.doLast(new Action<Task>() {
                 @Override
                 public void execute(Task task) {
                     if (expectedOutputFile.exists() == false) {
-                        throw new InvalidUserDataException(
-                            "Building " + bwcVersion.get() + " didn't generate expected artifact " + expectedOutputFile
-                        );
+                        Path relativeOutputPath = project.getRootDir().toPath().relativize(expectedOutputFile.toPath());
+                        final String message = "Building %s didn't generate expected artifact [%s]. The working branch may be "
+                            + "out-of-date - try merging in the latest upstream changes to the branch.";
+                        throw new InvalidUserDataException(message.formatted(bwcVersion.get(), relativeOutputPath));
                     }
                 }
             });
@@ -319,5 +313,4 @@ public class InternalDistributionBwcSetupPlugin implements InternalPlugin {
         }
     }
 
-    public abstract class BwcTaskThrottle implements BuildService<BuildServiceParameters.None> {}
 }

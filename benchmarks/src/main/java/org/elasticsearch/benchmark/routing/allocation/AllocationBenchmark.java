@@ -8,6 +8,7 @@
 package org.elasticsearch.benchmark.routing.allocation;
 
 import org.elasticsearch.Version;
+import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.cluster.ClusterName;
 import org.elasticsearch.cluster.ClusterState;
 import org.elasticsearch.cluster.metadata.IndexMetadata;
@@ -150,18 +151,22 @@ public class AllocationBenchmark {
         return Integer.valueOf(v.trim());
     }
 
+    /**
+     * Once we use DesiredBalanceShardsAllocator this only measures reconciliation, not the balance calculation
+     */
     @Benchmark
     public ClusterState measureAllocation() {
         ClusterState clusterState = initialClusterState;
         while (clusterState.getRoutingNodes().hasUnassignedShards()) {
             clusterState = strategy.applyStartedShards(
                 clusterState,
-                StreamSupport.stream(clusterState.getRoutingNodes().spliterator(), false)
+                clusterState.getRoutingNodes()
+                    .stream()
                     .flatMap(shardRoutings -> StreamSupport.stream(shardRoutings.spliterator(), false))
                     .filter(ShardRouting::initializing)
                     .collect(Collectors.toList())
             );
-            clusterState = strategy.reroute(clusterState, "reroute");
+            clusterState = strategy.reroute(clusterState, "reroute", ActionListener.noop());
         }
         return clusterState;
     }

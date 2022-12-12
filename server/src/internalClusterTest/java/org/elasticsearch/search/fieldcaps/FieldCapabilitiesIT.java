@@ -8,8 +8,6 @@
 
 package org.elasticsearch.search.fieldcaps;
 
-import org.apache.lucene.search.MatchAllDocsQuery;
-import org.apache.lucene.search.Query;
 import org.elasticsearch.ElasticsearchException;
 import org.elasticsearch.action.fieldcaps.FieldCapabilities;
 import org.elasticsearch.action.fieldcaps.FieldCapabilitiesAction;
@@ -25,14 +23,15 @@ import org.elasticsearch.cluster.routing.allocation.command.MoveAllocationComman
 import org.elasticsearch.common.breaker.CircuitBreaker;
 import org.elasticsearch.common.breaker.CircuitBreakingException;
 import org.elasticsearch.common.io.stream.StreamInput;
-import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.common.settings.Settings;
+import org.elasticsearch.index.IndexMode;
 import org.elasticsearch.index.IndexService;
+import org.elasticsearch.index.IndexSettings;
 import org.elasticsearch.index.mapper.DocumentParserContext;
 import org.elasticsearch.index.mapper.KeywordFieldMapper;
 import org.elasticsearch.index.mapper.MetadataFieldMapper;
+import org.elasticsearch.index.mapper.SourceLoader;
 import org.elasticsearch.index.mapper.TimeSeriesParams;
-import org.elasticsearch.index.query.AbstractQueryBuilder;
 import org.elasticsearch.index.query.QueryBuilder;
 import org.elasticsearch.index.query.QueryBuilders;
 import org.elasticsearch.index.query.QueryRewriteContext;
@@ -43,6 +42,7 @@ import org.elasticsearch.indices.IndicesService;
 import org.elasticsearch.plugins.MapperPlugin;
 import org.elasticsearch.plugins.Plugin;
 import org.elasticsearch.plugins.SearchPlugin;
+import org.elasticsearch.search.DummyQueryBuilder;
 import org.elasticsearch.test.ESIntegTestCase;
 import org.elasticsearch.test.transport.MockTransportService;
 import org.elasticsearch.transport.TransportService;
@@ -59,8 +59,10 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
+import java.util.stream.IntStream;
 
 import static java.util.Collections.singletonList;
 import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertAcked;
@@ -71,6 +73,8 @@ import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasKey;
 import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.not;
+import static org.hamcrest.Matchers.nullValue;
 
 public class FieldCapabilitiesIT extends ESIntegTestCase {
 
@@ -122,7 +126,14 @@ public class FieldCapabilitiesIT extends ESIntegTestCase {
             .endObject()
             .endObject()
             .endObject();
-        assertAcked(prepareCreate("old_index").setMapping(oldIndexMapping));
+
+        Settings settings = Settings.builder()
+            .put(IndexSettings.MODE.getKey(), IndexMode.TIME_SERIES)
+            .putList(IndexMetadata.INDEX_ROUTING_PATH.getKey(), List.of("some_dimension"))
+            .put(IndexSettings.TIME_SERIES_START_TIME.getKey(), "2006-01-08T23:40:53.384Z")
+            .put(IndexSettings.TIME_SERIES_END_TIME.getKey(), "2106-01-08T23:40:53.384Z")
+            .build();
+        assertAcked(prepareCreate("old_index").setSettings(settings).setMapping(oldIndexMapping));
 
         XContentBuilder newIndexMapping = XContentFactory.jsonBuilder()
             .startObject()
@@ -569,6 +580,67 @@ public class FieldCapabilitiesIT extends ESIntegTestCase {
         }
     }
 
+    public void testManyIndicesWithSameMapping() {
+        final String mapping = """
+             {
+                 "properties": {
+                   "message_field": { "type": "text" },
+                   "value_field": { "type": "long" },
+                   "multi_field" : { "type" : "ip", "fields" : { "keyword" : { "type" : "keyword" } } },
+                   "timestamp": {"type": "date"}
+                 }
+             }
+            """;
+        String[] indices = IntStream.range(0, between(1, 9)).mapToObj(n -> "test_many_index_" + n).toArray(String[]::new);
+        for (String index : indices) {
+            assertAcked(client().admin().indices().prepareCreate(index).setMapping(mapping).get());
+        }
+        FieldCapabilitiesRequest request = new FieldCapabilitiesRequest();
+        request.indices("test_many_index_*");
+        request.fields("*");
+        boolean excludeMultiField = randomBoolean();
+        if (excludeMultiField) {
+            request.filters("-multifield");
+        }
+        Consumer<FieldCapabilitiesResponse> verifyResponse = resp -> {
+            assertThat(resp.getIndices(), equalTo(indices));
+            assertThat(resp.getField("message_field"), hasKey("text"));
+            assertThat(resp.getField("message_field").get("text").indices(), nullValue());
+            assertTrue(resp.getField("message_field").get("text").isSearchable());
+            assertFalse(resp.getField("message_field").get("text").isAggregatable());
+
+            assertThat(resp.getField("value_field"), hasKey("long"));
+            assertThat(resp.getField("value_field").get("long").indices(), nullValue());
+            assertTrue(resp.getField("value_field").get("long").isSearchable());
+            assertTrue(resp.getField("value_field").get("long").isAggregatable());
+
+            assertThat(resp.getField("timestamp"), hasKey("date"));
+
+            assertThat(resp.getField("multi_field"), hasKey("ip"));
+            if (excludeMultiField) {
+                assertThat(resp.getField("multi_field.keyword"), not(hasKey("keyword")));
+            } else {
+                assertThat(resp.getField("multi_field.keyword"), hasKey("keyword"));
+            }
+        };
+        // Single mapping
+        verifyResponse.accept(client().execute(FieldCapabilitiesAction.INSTANCE, request).actionGet());
+
+        // add an extra field for some indices
+        String[] indicesWithExtraField = randomSubsetOf(between(1, indices.length), indices).stream().sorted().toArray(String[]::new);
+        ensureGreen(indices);
+        assertAcked(client().admin().indices().preparePutMapping(indicesWithExtraField).setSource("extra_field", "type=integer").get());
+        for (String index : indicesWithExtraField) {
+            client().prepareIndex(index).setSource("extra_field", randomIntBetween(1, 1000)).get();
+        }
+        FieldCapabilitiesResponse resp = client().execute(FieldCapabilitiesAction.INSTANCE, request).actionGet();
+        verifyResponse.accept(resp);
+        assertThat(resp.getField("extra_field"), hasKey("integer"));
+        assertThat(resp.getField("extra_field").get("integer").indices(), nullValue());
+        assertTrue(resp.getField("extra_field").get("integer").isSearchable());
+        assertTrue(resp.getField("extra_field").get("integer").isAggregatable());
+    }
+
     private void assertIndices(FieldCapabilitiesResponse response, String... indices) {
         assertNotNull(response.getIndices());
         Arrays.sort(indices);
@@ -591,7 +663,7 @@ public class FieldCapabilitiesIT extends ESIntegTestCase {
         }
     }
 
-    static class ExceptionOnRewriteQueryBuilder extends AbstractQueryBuilder<ExceptionOnRewriteQueryBuilder> {
+    static class ExceptionOnRewriteQueryBuilder extends DummyQueryBuilder {
 
         public static final String NAME = "exception";
 
@@ -611,30 +683,6 @@ public class FieldCapabilitiesIT extends ESIntegTestCase {
                 ;
             }
             return this;
-        }
-
-        @Override
-        protected void doWriteTo(StreamOutput out) {}
-
-        @Override
-        protected void doXContent(XContentBuilder builder, Params params) throws IOException {
-            builder.startObject(NAME);
-            builder.endObject();
-        }
-
-        @Override
-        protected Query doToQuery(SearchExecutionContext context) {
-            return new MatchAllDocsQuery();
-        }
-
-        @Override
-        protected boolean doEquals(ExceptionOnRewriteQueryBuilder other) {
-            return false;
-        }
-
-        @Override
-        protected int doHashCode() {
-            return 0;
         }
 
         @Override
@@ -669,6 +717,11 @@ public class FieldCapabilitiesIT extends ESIntegTestCase {
         @Override
         protected String contentType() {
             return CONTENT_TYPE;
+        }
+
+        @Override
+        public SourceLoader.SyntheticFieldLoader syntheticFieldLoader() {
+            throw new UnsupportedOperationException();
         }
 
         private static final TypeParser PARSER = new FixedTypeParser(c -> new TestMetadataMapper());

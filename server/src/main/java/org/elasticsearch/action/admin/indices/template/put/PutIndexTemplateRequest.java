@@ -40,11 +40,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 import static org.elasticsearch.action.ValidateActions.addValidationError;
 import static org.elasticsearch.common.settings.Settings.readSettingsFromStream;
-import static org.elasticsearch.common.settings.Settings.writeSettingsToStream;
 
 /**
  * A request to create an index template.
@@ -297,32 +295,33 @@ public class PutIndexTemplateRequest extends MasterNodeRequest<PutIndexTemplateR
      */
     @SuppressWarnings("unchecked")
     public PutIndexTemplateRequest source(Map<String, Object> templateSource) {
-        for (Map.Entry<String, Object> entry : templateSource.entrySet()) {
-            String key = entry.getKey();
-            if (key.equals("index_patterns")) {
+        Map<String, Object> source = templateSource;
+        for (Map.Entry<String, Object> entry : source.entrySet()) {
+            String name = entry.getKey();
+            if (name.equals("index_patterns")) {
                 if (entry.getValue() instanceof String) {
                     patterns(Collections.singletonList((String) entry.getValue()));
                 } else if (entry.getValue() instanceof List) {
-                    List<String> elements = ((List<?>) entry.getValue()).stream().map(Object::toString).collect(Collectors.toList());
+                    List<String> elements = ((List<?>) entry.getValue()).stream().map(Object::toString).toList();
                     patterns(elements);
                 } else {
                     throw new IllegalArgumentException("Malformed [index_patterns] value, should be a string or a list of strings");
                 }
-            } else if (key.equals("order")) {
+            } else if (name.equals("order")) {
                 order(XContentMapValues.nodeIntegerValue(entry.getValue(), order()));
-            } else if ("version".equals(key)) {
+            } else if ("version".equals(name)) {
                 if ((entry.getValue() instanceof Integer) == false) {
                     throw new IllegalArgumentException("Malformed [version] value, should be an integer");
                 }
                 version((Integer) entry.getValue());
-            } else if (key.equals("settings")) {
+            } else if (name.equals("settings")) {
                 if ((entry.getValue() instanceof Map) == false) {
                     throw new IllegalArgumentException("Malformed [settings] section, should include an inner object");
                 }
                 settings((Map<String, Object>) entry.getValue());
-            } else if (key.equals("mappings")) {
-                Map<String, Object> mappings1 = (Map<String, Object>) entry.getValue();
-                for (Map.Entry<String, Object> entry1 : mappings1.entrySet()) {
+            } else if (name.equals("mappings")) {
+                Map<String, Object> mappings = (Map<String, Object>) entry.getValue();
+                for (Map.Entry<String, Object> entry1 : mappings.entrySet()) {
                     if ((entry1.getValue() instanceof Map) == false) {
                         throw new IllegalArgumentException(
                             "Malformed [mappings] section for type ["
@@ -332,10 +331,10 @@ public class PutIndexTemplateRequest extends MasterNodeRequest<PutIndexTemplateR
                     }
                     mapping((Map<String, Object>) entry1.getValue());
                 }
-            } else if (key.equals("aliases")) {
+            } else if (name.equals("aliases")) {
                 aliases((Map<String, Object>) entry.getValue());
             } else {
-                throw new ElasticsearchParseException("unknown key [{}] in the template ", key);
+                throw new ElasticsearchParseException("unknown key [{}] in the template ", name);
             }
         }
         return this;
@@ -446,7 +445,7 @@ public class PutIndexTemplateRequest extends MasterNodeRequest<PutIndexTemplateR
         out.writeStringCollection(indexPatterns);
         out.writeInt(order);
         out.writeBoolean(create);
-        writeSettingsToStream(settings, out);
+        settings.writeTo(out);
         if (out.getVersion().before(Version.V_8_0_0)) {
             out.writeVInt(mappings == null ? 0 : 1);
             if (mappings != null) {
@@ -456,10 +455,7 @@ public class PutIndexTemplateRequest extends MasterNodeRequest<PutIndexTemplateR
         } else {
             out.writeOptionalString(mappings);
         }
-        out.writeVInt(aliases.size());
-        for (Alias alias : aliases) {
-            alias.writeTo(out);
-        }
+        out.writeCollection(aliases);
         out.writeOptionalVInt(version);
     }
 }

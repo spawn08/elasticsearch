@@ -8,7 +8,8 @@
 
 package org.elasticsearch.indices.stats;
 
-import org.apache.lucene.util.LuceneTestCase.SuppressCodecs;
+import org.apache.lucene.tests.util.LuceneTestCase.SuppressCodecs;
+import org.elasticsearch.action.ActionFuture;
 import org.elasticsearch.action.DocWriteResponse;
 import org.elasticsearch.action.admin.cluster.node.stats.NodesStatsResponse;
 import org.elasticsearch.action.admin.indices.create.CreateIndexRequest;
@@ -844,7 +845,7 @@ public class IndexStatsIT extends ESIntegTestCase {
 
         client().admin().indices().prepareRefresh().execute().actionGet();
         IndicesStatsRequestBuilder builder = client().admin().indices().prepareStats();
-        Flag[] values = CommonStatsFlags.Flag.values();
+        Flag[] values = CommonStatsFlags.SHARD_LEVEL.getFlags();
         for (Flag flag : values) {
             set(flag, builder, false);
         }
@@ -953,7 +954,8 @@ public class IndexStatsIT extends ESIntegTestCase {
             Flag.RequestCache,
             Flag.Recovery,
             Flag.Bulk,
-            Flag.Shards };
+            Flag.Shards,
+            Flag.Mappings };
 
         assertThat(flags.length, equalTo(Flag.values().length));
         for (int i = 0; i < flags.length; i++) {
@@ -1098,64 +1100,27 @@ public class IndexStatsIT extends ESIntegTestCase {
 
     private static void set(Flag flag, IndicesStatsRequestBuilder builder, boolean set) {
         switch (flag) {
-            case Docs:
-                builder.setDocs(set);
-                break;
-            case FieldData:
-                builder.setFieldData(set);
-                break;
-            case QueryCache:
-                builder.setQueryCache(set);
-                break;
-            case Flush:
-                builder.setFlush(set);
-                break;
-            case Get:
-                builder.setGet(set);
-                break;
-            case Indexing:
-                builder.setIndexing(set);
-                break;
-            case Merge:
-                builder.setMerge(set);
-                break;
-            case Refresh:
-                builder.setRefresh(set);
-                break;
-            case Search:
-                builder.setSearch(set);
-                break;
-            case Store:
-                builder.setStore(set);
-                break;
-            case Warmer:
-                builder.setWarmer(set);
-                break;
-            case Completion:
-                builder.setCompletion(set);
-                break;
-            case Segments:
-                builder.setSegments(set);
-                break;
-            case Translog:
-                builder.setTranslog(set);
-                break;
-            case RequestCache:
-                builder.setRequestCache(set);
-                break;
-            case Recovery:
-                builder.setRecovery(set);
-                break;
-            case Bulk:
-                builder.setBulk(set);
-                break;
-            case Shards:
+            case Docs -> builder.setDocs(set);
+            case FieldData -> builder.setFieldData(set);
+            case QueryCache -> builder.setQueryCache(set);
+            case Flush -> builder.setFlush(set);
+            case Get -> builder.setGet(set);
+            case Indexing -> builder.setIndexing(set);
+            case Merge -> builder.setMerge(set);
+            case Refresh -> builder.setRefresh(set);
+            case Search -> builder.setSearch(set);
+            case Store -> builder.setStore(set);
+            case Warmer -> builder.setWarmer(set);
+            case Completion -> builder.setCompletion(set);
+            case Segments -> builder.setSegments(set);
+            case Translog -> builder.setTranslog(set);
+            case RequestCache -> builder.setRequestCache(set);
+            case Recovery -> builder.setRecovery(set);
+            case Bulk -> builder.setBulk(set);
+            case Shards ->
                 // We don't actually expose shards in IndexStats, but this test fails if it isn't handled
                 builder.request().flags().set(Flag.Shards, set);
-                break;
-            default:
-                fail("new flag? " + flag);
-                break;
+            default -> fail("new flag? " + flag);
         }
     }
 
@@ -1197,6 +1162,8 @@ public class IndexStatsIT extends ESIntegTestCase {
                 return response.getBulk() != null;
             case Shards:
                 return response.getShards() != null;
+            case Mappings:
+                return response.getNodeMappings() != null;
             default:
                 fail("new flag? " + flag);
                 return false;
@@ -1469,6 +1436,38 @@ public class IndexStatsIT extends ESIntegTestCase {
 
         assertThat(shardFailures.get(), emptyCollectionOf(DefaultShardOperationFailedException.class));
         assertThat(executionFailures.get(), emptyCollectionOf(Exception.class));
+    }
+
+    public void testWriteLoadIsCaptured() throws Exception {
+        final String indexName = "test-idx";
+        createIndex(indexName);
+        final IndicesStatsResponse statsResponseBeforeIndexing = client().admin().indices().prepareStats(indexName).get();
+        final IndexStats indexStatsBeforeIndexing = statsResponseBeforeIndexing.getIndices().get(indexName);
+        assertThat(indexStatsBeforeIndexing, is(notNullValue()));
+        assertThat(indexStatsBeforeIndexing.getPrimaries().getIndexing().getTotal().getWriteLoad(), is(equalTo(0.0)));
+
+        final AtomicInteger idGenerator = new AtomicInteger();
+        assertBusy(() -> {
+            final int numDocs = randomIntBetween(15, 25);
+            final List<ActionFuture<IndexResponse>> indexRequestFutures = new ArrayList<>(numDocs);
+            for (int i = 0; i < numDocs; i++) {
+                indexRequestFutures.add(
+                    client().prepareIndex(indexName)
+                        .setId(Integer.toString(idGenerator.incrementAndGet()))
+                        .setSource("{}", XContentType.JSON)
+                        .execute()
+                );
+            }
+
+            for (ActionFuture<IndexResponse> indexRequestFuture : indexRequestFutures) {
+                assertThat(indexRequestFuture.get().getResult(), equalTo(DocWriteResponse.Result.CREATED));
+            }
+
+            final IndicesStatsResponse statsResponseAfterIndexing = client().admin().indices().prepareStats(indexName).get();
+            final IndexStats indexStatsAfterIndexing = statsResponseAfterIndexing.getIndices().get(indexName);
+            assertThat(indexStatsAfterIndexing, is(notNullValue()));
+            assertThat(indexStatsAfterIndexing.getPrimaries().getIndexing().getTotal().getWriteLoad(), is(greaterThan(0.0)));
+        });
     }
 
     /**

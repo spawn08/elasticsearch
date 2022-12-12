@@ -90,7 +90,6 @@ public class ServiceAccountIT extends ESRestTestCase {
                     "logs-*",
                     "metrics-*",
                     "traces-*",
-                    "synthetics-*",
                     ".logs-endpoint.diagnostic.collection-*",
                     ".logs-endpoint.action.responses-*"
                   ],
@@ -103,6 +102,17 @@ public class ServiceAccountIT extends ESRestTestCase {
                 },
                 {
                   "names": [
+                    "traces-apm.sampled-*"
+                  ],
+                  "privileges": [
+                    "read",
+                    "monitor",
+                    "maintenance"
+                  ],
+                  "allow_restricted_indices": false
+                },
+                {
+                  "names": [
                     ".fleet-*"
                   ],
                   "privileges": [
@@ -110,9 +120,22 @@ public class ServiceAccountIT extends ESRestTestCase {
                     "write",
                     "monitor",
                     "create_index",
-                    "auto_configure"
+                    "auto_configure",
+                    "maintenance"
                   ],
                   "allow_restricted_indices": true
+                },
+                {
+                  "names": [
+                    "synthetics-*"
+                  ],
+                  "privileges": [
+                    "read",
+                    "write",
+                    "create_index",
+                    "auto_configure"
+                  ],
+                  "allow_restricted_indices": false
                 }
               ],
               "applications": [        {
@@ -131,6 +154,48 @@ public class ServiceAccountIT extends ESRestTestCase {
               }
             }
           }""";
+
+    private static final String ELASTIC_ENTERPRISE_SEARCH_SERVER_ROLE_DESCRIPTOR = """
+        {
+            "cluster": [
+                "manage",
+                "manage_security"
+            ],
+            "indices": [
+                {
+                    "names": [
+                        "search-*",
+                        ".elastic-analytics-collections",
+                        ".ent-search-*",
+                        ".monitoring-ent-search-*",
+                        "metricbeat-ent-search-*",
+                        "enterprise-search-*",
+                        "logs-app_search.analytics-default",
+                        "logs-elastic_analytics.events-*",
+                        "logs-enterprise_search.api-default",
+                        "logs-enterprise_search.audit-default",
+                        "logs-app_search.search_relevance_suggestions-default",
+                        "logs-crawler-default",
+                        "logs-elastic_crawler-default",
+                        "logs-workplace_search.analytics-default",
+                        "logs-workplace_search.content_events-default",
+                        ".elastic-connectors*"
+                    ],
+                    "privileges": [
+                        "manage",
+                        "read",
+                        "write"
+                    ],
+                    "allow_restricted_indices": false
+                }
+            ],
+            "applications": [],
+            "run_as": [],
+            "metadata": {},
+            "transient_metadata": {
+                "enabled": true
+            }
+        }""";
 
     @BeforeClass
     public static void init() throws URISyntaxException, FileNotFoundException {
@@ -185,6 +250,19 @@ public class ServiceAccountIT extends ESRestTestCase {
                 ReservedRolesStore.kibanaSystemRoleDescriptor(KibanaSystemUser.ROLE_NAME)
                     .toXContent(JsonXContent.contentBuilder(), ToXContent.EMPTY_PARAMS)
             )
+        );
+
+        final Request getServiceAccountRequestEnterpriseSearchService = new Request(
+            "GET",
+            "_security/service/elastic/enterprise-search-server"
+        );
+        final Response getServiceAccountResponseEnterpriseSearchService = client().performRequest(
+            getServiceAccountRequestEnterpriseSearchService
+        );
+        assertServiceAccountRoleDescriptor(
+            getServiceAccountResponseEnterpriseSearchService,
+            "elastic/enterprise-search-server",
+            ELASTIC_ENTERPRISE_SEARCH_SERVER_ROLE_DESCRIPTOR
         );
 
         final String requestPath = "_security/service/" + randomFrom("foo", "elastic/foo", "foo/bar");
@@ -250,9 +328,9 @@ public class ServiceAccountIT extends ESRestTestCase {
 
         final String refreshToken = (String) oauthTokenResponseMap.get("refresh_token");
         final Request refreshTokenRequest = new Request("POST", "_security/oauth2/token");
-        refreshTokenRequest.setJsonEntity("""
+        refreshTokenRequest.setJsonEntity(formatted("""
             {"grant_type":"refresh_token","refresh_token":"%s"}
-            """.formatted(refreshToken));
+            """, refreshToken));
         final Response refreshTokenResponse = adminClient().performRequest(refreshTokenRequest);
         assertOK(refreshTokenResponse);
     }
@@ -442,8 +520,8 @@ public class ServiceAccountIT extends ESRestTestCase {
         assertThat(e.getMessage(), containsString("is unauthorized for API key"));
 
         final Request invalidateApiKeysRequest = new Request("DELETE", "_security/api_key");
-        invalidateApiKeysRequest.setJsonEntity("""
-            {"ids":["%s"],"owner":true}""".formatted(apiKeyId1));
+        invalidateApiKeysRequest.setJsonEntity(formatted("""
+            {"ids":["%s"],"owner":true}""", apiKeyId1));
         invalidateApiKeysRequest.setOptions(requestOptions);
         final Response invalidateApiKeysResponse = client().performRequest(invalidateApiKeysRequest);
         assertOK(invalidateApiKeysResponse);

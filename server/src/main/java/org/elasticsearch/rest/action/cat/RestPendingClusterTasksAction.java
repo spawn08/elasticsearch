@@ -10,7 +10,7 @@ package org.elasticsearch.rest.action.cat;
 
 import org.elasticsearch.action.admin.cluster.tasks.PendingClusterTasksRequest;
 import org.elasticsearch.action.admin.cluster.tasks.PendingClusterTasksResponse;
-import org.elasticsearch.client.node.NodeClient;
+import org.elasticsearch.client.internal.node.NodeClient;
 import org.elasticsearch.cluster.service.PendingClusterTask;
 import org.elasticsearch.common.Table;
 import org.elasticsearch.rest.RestRequest;
@@ -66,10 +66,10 @@ public class RestPendingClusterTasksAction extends AbstractCatAction {
         return t;
     }
 
-    private Table buildTable(RestRequest request, PendingClusterTasksResponse tasks) {
+    private Table buildTable(RestRequest request, PendingClusterTasksResponse response) {
         Table t = getTableWithHeader(request);
 
-        for (PendingClusterTask task : tasks) {
+        for (PendingClusterTask task : response.pendingTasks()) {
             t.startRow();
             t.addCell(task.getInsertOrder());
             t.addCell(task.getTimeInQueue());

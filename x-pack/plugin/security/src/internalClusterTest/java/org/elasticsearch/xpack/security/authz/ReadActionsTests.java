@@ -17,7 +17,7 @@ import org.elasticsearch.action.support.IndicesOptions;
 import org.elasticsearch.action.termvectors.MultiTermVectorsAction;
 import org.elasticsearch.action.termvectors.MultiTermVectorsResponse;
 import org.elasticsearch.action.termvectors.TermVectorsAction;
-import org.elasticsearch.client.Requests;
+import org.elasticsearch.client.internal.Requests;
 import org.elasticsearch.core.TimeValue;
 import org.elasticsearch.index.IndexNotFoundException;
 import org.elasticsearch.search.SearchHit;
@@ -39,7 +39,7 @@ public class ReadActionsTests extends SecurityIntegTestCase {
 
     @Override
     protected String configRoles() {
-        return """
+        return formatted("""
             %s:
               cluster: [ ALL ]
               indices:
@@ -47,7 +47,7 @@ public class ReadActionsTests extends SecurityIntegTestCase {
                   privileges: [ manage, write ]
                 - names: ['/test.*/', '/-alias.*/']
                   privileges: [ read ]
-            """.formatted(SecuritySettingsSource.TEST_ROLE);
+            """, SecuritySettingsSource.TEST_ROLE);
     }
 
     public void testSearchForAll() {
@@ -213,7 +213,8 @@ public class ReadActionsTests extends SecurityIntegTestCase {
     }
 
     public void testMissingDateMath() {
-        expectThrows(IndexNotFoundException.class, () -> trySearch("<logstash-{now/M}>"));
+        expectThrows(ElasticsearchSecurityException.class, () -> trySearch("<unauthorized-datemath-{now/M}>"));
+        expectThrows(IndexNotFoundException.class, () -> trySearch("<test-datemath-{now/M}>"));
     }
 
     public void testMultiSearchUnauthorizedIndex() {

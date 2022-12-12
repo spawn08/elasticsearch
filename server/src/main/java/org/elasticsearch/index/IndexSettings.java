@@ -13,7 +13,9 @@ import org.apache.lucene.index.MergePolicy;
 import org.elasticsearch.Build;
 import org.elasticsearch.Version;
 import org.elasticsearch.cluster.metadata.IndexMetadata;
+import org.elasticsearch.cluster.routing.IndexRouting;
 import org.elasticsearch.common.logging.Loggers;
+import org.elasticsearch.common.settings.AbstractScopedSettings;
 import org.elasticsearch.common.settings.IndexScopedSettings;
 import org.elasticsearch.common.settings.Setting;
 import org.elasticsearch.common.settings.Setting.Property;
@@ -51,10 +53,9 @@ import static org.elasticsearch.index.mapper.MapperService.INDEX_MAPPING_TOTAL_F
  * be called for each settings update.
  */
 public final class IndexSettings {
-    public static final Setting<List<String>> DEFAULT_FIELD_SETTING = Setting.listSetting(
+    public static final Setting<List<String>> DEFAULT_FIELD_SETTING = Setting.stringListSetting(
         "index.query.default_field",
         Collections.singletonList("*"),
-        Function.identity(),
         Property.IndexScope,
         Property.Dynamic
     );
@@ -106,16 +107,12 @@ public final class IndexSettings {
         Property.IndexScope
     );
     public static final Setting<String> INDEX_CHECK_ON_STARTUP = new Setting<>("index.shard.check_on_startup", "false", (s) -> {
-        switch (s) {
-            case "false":
-            case "true":
-            case "checksum":
-                return s;
-            default:
-                throw new IllegalArgumentException(
-                    "unknown value for [index.shard.check_on_startup] must be one of " + "[true, false, checksum] but was: " + s
-                );
-        }
+        return switch (s) {
+            case "false", "true", "checksum" -> s;
+            default -> throw new IllegalArgumentException(
+                "unknown value for [index.shard.check_on_startup] must be one of " + "[true, false, checksum] but was: " + s
+            );
+        };
     }, Property.IndexScope);
 
     /**
@@ -269,8 +266,8 @@ public final class IndexSettings {
          * can get stuck in an infinite loop as the shouldPeriodicallyFlush can still be true after flushing.
          * However, small thresholds are useful for testing so we do not add a large lower bound here.
          */
-        new ByteSizeValue(Translog.DEFAULT_HEADER_SIZE_IN_BYTES + 1, ByteSizeUnit.BYTES),
-        new ByteSizeValue(Long.MAX_VALUE, ByteSizeUnit.BYTES),
+        ByteSizeValue.ofBytes(Translog.DEFAULT_HEADER_SIZE_IN_BYTES + 1),
+        ByteSizeValue.ofBytes(Long.MAX_VALUE),
         Property.Dynamic,
         Property.IndexScope
     );
@@ -281,8 +278,8 @@ public final class IndexSettings {
     public static final Setting<ByteSizeValue> INDEX_FLUSH_AFTER_MERGE_THRESHOLD_SIZE_SETTING = Setting.byteSizeSetting(
         "index.flush_after_merge",
         new ByteSizeValue(512, ByteSizeUnit.MB),
-        new ByteSizeValue(0, ByteSizeUnit.BYTES), // always flush after merge
-        new ByteSizeValue(Long.MAX_VALUE, ByteSizeUnit.BYTES), // never flush after merge
+        ByteSizeValue.ZERO, // always flush after merge
+        ByteSizeValue.ofBytes(Long.MAX_VALUE), // never flush after merge
         Property.Dynamic,
         Property.IndexScope
     );
@@ -300,8 +297,8 @@ public final class IndexSettings {
          * generation threshold. However, small thresholds are useful for testing so we
          * do not add a large lower bound here.
          */
-        new ByteSizeValue(Translog.DEFAULT_HEADER_SIZE_IN_BYTES + 1, ByteSizeUnit.BYTES),
-        new ByteSizeValue(Long.MAX_VALUE, ByteSizeUnit.BYTES),
+        ByteSizeValue.ofBytes(Translog.DEFAULT_HEADER_SIZE_IN_BYTES + 1),
+        ByteSizeValue.ofBytes(Long.MAX_VALUE),
         Property.Dynamic,
         Property.IndexScope
     );
@@ -351,7 +348,7 @@ public final class IndexSettings {
      **/
     public static final Setting<TimeValue> INDEX_TRANSLOG_RETENTION_AGE_SETTING = Setting.timeSetting(
         "index.translog.retention.age",
-        settings -> TimeValue.MINUS_ONE,
+        TimeValue.MINUS_ONE,
         TimeValue.MINUS_ONE,
         Property.Dynamic,
         Property.IndexScope
@@ -459,6 +456,18 @@ public final class IndexSettings {
     );
 
     /**
+     * This index setting is intentionally undocumented and should be used as an escape hatch to disable BloomFilter of the
+     * _id field of non-data-stream indices, which is enabled by default. This setting doesn't affect data-stream indices.
+     */
+    public static final Setting<Boolean> BLOOM_FILTER_ID_FIELD_ENABLED_SETTING = Setting.boolSetting(
+        "index.bloom_filter_for_id_field.enabled",
+        true,
+        Setting.Property.Dynamic,
+        Setting.Property.IndexScope,
+        Property.DeprecatedWarning
+    );
+
+    /**
      * Is the {@code index.mode} enabled? It should only be enbaled if you
      * pass a jvm parameter or are running a snapshot build.
      */
@@ -481,7 +490,7 @@ public final class IndexSettings {
      */
     public static final Setting<Instant> TIME_SERIES_START_TIME = Setting.dateSetting(
         "index.time_series.start_time",
-        Instant.ofEpochMilli(0),
+        Instant.ofEpochMilli(DateUtils.MAX_MILLIS_BEFORE_MINUS_9999),
         v -> {},
         Property.IndexScope,
         Property.Final
@@ -523,7 +532,7 @@ public final class IndexSettings {
         IndexMode.class,
         "index.mode",
         IndexMode.STANDARD,
-        new Setting.Validator<IndexMode>() {
+        new Setting.Validator<>() {
             @Override
             public void validate(IndexMode value) {}
 
@@ -541,13 +550,18 @@ public final class IndexSettings {
         Property.Final
     );
 
-    public static final Setting<TimeValue> LOOK_AHEAD_TIME = Setting.timeSetting(
-        "index.look_ahead_time",
-        TimeValue.timeValueHours(2),
-        TimeValue.timeValueMinutes(1),
-        TimeValue.timeValueDays(7),
+    /**
+     * Legacy index setting, kept for 7.x BWC compatibility. This setting has no effect in 8.x. Do not use.
+     * TODO: Remove in 9.0
+     */
+    @Deprecated
+    public static final Setting<Integer> MAX_ADJACENCY_MATRIX_FILTERS_SETTING = Setting.intSetting(
+        "index.max_adjacency_matrix_filters",
+        100,
+        2,
+        Property.Dynamic,
         Property.IndexScope,
-        Property.Final
+        Property.IndexSettingDeprecatedInV7AndRemovedInV8
     );
 
     private final Index index;
@@ -564,7 +578,7 @@ public final class IndexSettings {
      * The bounds for {@code @timestamp} on this index or
      * {@code null} if there are no bounds.
      */
-    private final TimestampBounds timestampBounds;
+    private volatile TimestampBounds timestampBounds;
 
     // volatile fields are updated via #updateIndexMetadata(IndexMetadata) under lock
     private volatile Settings settings;
@@ -639,6 +653,8 @@ public final class IndexSettings {
      */
     private volatile int maxRegexLength;
 
+    private final IndexRouting indexRouting;
+
     /**
      * Returns the default search fields for this index.
      */
@@ -706,8 +722,14 @@ public final class IndexSettings {
         nodeName = Node.NODE_NAME_SETTING.get(settings);
         this.indexMetadata = indexMetadata;
         numberOfShards = settings.getAsInt(IndexMetadata.SETTING_NUMBER_OF_SHARDS, null);
-        mode = isTimeSeriesModeEnabled() ? scopedSettings.get(MODE) : IndexMode.STANDARD;
-        this.timestampBounds = TIME_SERIES_START_TIME.exists(settings) ? new TimestampBounds(scopedSettings) : null;
+        mode = scopedSettings.get(MODE);
+        this.timestampBounds = mode.getTimestampBound(indexMetadata);
+        if (timestampBounds != null) {
+            scopedSettings.addSettingsUpdateConsumer(
+                IndexSettings.TIME_SERIES_END_TIME,
+                endTime -> { this.timestampBounds = TimestampBounds.updateEndTime(this.timestampBounds, endTime); }
+            );
+        }
         this.searchThrottled = INDEX_SEARCH_THROTTLED.get(settings);
         this.queryStringLenient = QUERY_STRING_LENIENT_SETTING.get(settings);
         this.queryStringAnalyzeWildcard = QUERY_STRING_ANALYZE_WILDCARD.get(nodeSettings);
@@ -750,6 +772,7 @@ public final class IndexSettings {
         mappingDepthLimit = scopedSettings.get(INDEX_MAPPING_DEPTH_LIMIT_SETTING);
         mappingFieldNameLengthLimit = scopedSettings.get(INDEX_MAPPING_FIELD_NAME_LENGTH_LIMIT_SETTING);
         mappingDimensionFieldsLimit = scopedSettings.get(INDEX_MAPPING_DIMENSION_FIELDS_LIMIT_SETTING);
+        indexRouting = IndexRouting.fromIndexMetadata(indexMetadata);
 
         scopedSettings.addSettingsUpdateConsumer(MergePolicyConfig.INDEX_COMPOUND_FORMAT_SETTING, mergePolicyConfig::setNoCFSRatio);
         scopedSettings.addSettingsUpdateConsumer(
@@ -943,6 +966,16 @@ public final class IndexSettings {
         if (version.equals(newIndexVersion) == false) {
             throw new IllegalArgumentException("version mismatch on settings update expected: " + version + " but was: " + newIndexVersion);
         }
+        Version newCompatibilityVersion = IndexMetadata.SETTING_INDEX_VERSION_COMPATIBILITY.get(newSettings);
+        Version compatibilityVersion = IndexMetadata.SETTING_INDEX_VERSION_COMPATIBILITY.get(settings);
+        if (compatibilityVersion.equals(newCompatibilityVersion) == false) {
+            throw new IllegalArgumentException(
+                "compatibility version mismatch on settings update expected: "
+                    + compatibilityVersion
+                    + " but was: "
+                    + newCompatibilityVersion
+            );
+        }
         final String newUUID = newSettings.get(IndexMetadata.SETTING_INDEX_UUID, IndexMetadata.INDEX_UUID_NA_VALUE);
         if (newUUID.equals(getUUID()) == false) {
             throw new IllegalArgumentException("uuid mismatch on settings update expected: " + getUUID() + " but was: " + newUUID);
@@ -974,7 +1007,9 @@ public final class IndexSettings {
         if (left.equals(right)) {
             return true;
         }
-        return left.getByPrefix(IndexMetadata.INDEX_SETTING_PREFIX).equals(right.getByPrefix(IndexMetadata.INDEX_SETTING_PREFIX));
+        return left.getByPrefix(IndexMetadata.INDEX_SETTING_PREFIX).equals(right.getByPrefix(IndexMetadata.INDEX_SETTING_PREFIX))
+            && left.getByPrefix(AbstractScopedSettings.ARCHIVED_SETTINGS_PREFIX)
+                .equals(right.getByPrefix(AbstractScopedSettings.ARCHIVED_SETTINGS_PREFIX));
     }
 
     /**
@@ -1338,5 +1373,13 @@ public final class IndexSettings {
      */
     public TimestampBounds getTimestampBounds() {
         return timestampBounds;
+    }
+
+    /**
+     * The way that documents are routed on the coordinating
+     * node when being sent to shards of this index.
+     */
+    public IndexRouting getIndexRouting() {
+        return indexRouting;
     }
 }

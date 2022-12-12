@@ -15,13 +15,13 @@ import org.elasticsearch.client.ResponseException;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.test.rest.ESRestTestCase;
 import org.elasticsearch.xcontent.XContentBuilder;
-import org.yaml.snakeyaml.util.UriEncoder;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 import static org.elasticsearch.xcontent.XContentFactory.jsonBuilder;
@@ -525,7 +525,9 @@ public class MlBasicMultiNodeIT extends ESRestTestCase {
         }
         xContentBuilder.endObject();
 
-        Request request = new Request("PUT", BASE_PATH + "anomaly_detectors/" + UriEncoder.encode(jobId));
+        // url encoding is needed for the invalid case, which contains a space
+        String encodedJobId = jobId.replace(" ", "%20");
+        Request request = new Request("PUT", BASE_PATH + "anomaly_detectors/" + encodedJobId);
         request.setJsonEntity(Strings.toString(xContentBuilder));
         return client().performRequest(request);
     }
@@ -544,7 +546,7 @@ public class MlBasicMultiNodeIT extends ESRestTestCase {
         String dateFormat = datesHaveNanoSecondResolution ? "strict_date_optional_time_nanos" : "strict_date_optional_time";
         String randomNanos = datesHaveNanoSecondResolution ? "," + randomIntBetween(100000000, 999999999) : "";
         Request createAirlineDataRequest = new Request("PUT", "/airline-data");
-        createAirlineDataRequest.setJsonEntity("""
+        createAirlineDataRequest.setJsonEntity(String.format(Locale.ROOT, """
             {
               "mappings": {
                 "properties": {
@@ -560,7 +562,7 @@ public class MlBasicMultiNodeIT extends ESRestTestCase {
                   }
                 }
               }
-            }""".formatted(dateMappingType, dateFormat));
+            }""", dateMappingType, dateFormat));
         client().performRequest(createAirlineDataRequest);
         Request airlineData1 = new Request("PUT", "/airline-data/_doc/1");
         airlineData1.setJsonEntity("{\"time\":\"2016-06-01T00:00:00" + randomNanos + "Z\",\"airline\":\"AAA\",\"responsetime\":135.22}");

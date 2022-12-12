@@ -9,7 +9,6 @@ package org.elasticsearch.persistent;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.apache.logging.log4j.message.ParameterizedMessage;
 import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.action.admin.cluster.node.tasks.cancel.CancelTasksRequest;
 import org.elasticsearch.core.Nullable;
@@ -22,6 +21,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Predicate;
+
+import static org.elasticsearch.core.Strings.format;
 
 /**
  * Represents a executor node operation that corresponds to a persistent task
@@ -144,9 +145,9 @@ public class AllocatedPersistentTask extends CancellableTask {
         completeAndNotifyIfNeeded(null, Objects.requireNonNull(localAbortReason));
     }
 
-    private void completeAndNotifyIfNeeded(@Nullable Exception exception, @Nullable String localAbortReason) {
-        assert exception == null || localAbortReason == null
-            : "completion notification has both exception " + exception + " and local abort reason " + localAbortReason;
+    private void completeAndNotifyIfNeeded(@Nullable Exception failure, @Nullable String localAbortReason) {
+        assert failure == null || localAbortReason == null
+            : "completion notification has both exception " + failure + " and local abort reason " + localAbortReason;
         final State desiredState = (localAbortReason == null) ? State.COMPLETED : State.LOCAL_ABORTED;
         final State prevState = state.getAndUpdate(
             currentState -> (currentState != State.COMPLETED && currentState != State.LOCAL_ABORTED) ? desiredState : currentState
@@ -166,7 +167,7 @@ public class AllocatedPersistentTask extends CancellableTask {
                 } else {
                     throw new IllegalStateException(
                         "attempt to "
-                            + (exception != null ? "fail" : "complete")
+                            + (failure != null ? "fail" : "complete")
                             + " task ["
                             + getAction()
                             + "] with id ["
@@ -185,19 +186,19 @@ public class AllocatedPersistentTask extends CancellableTask {
                 );
             }
         } else {
-            if (exception != null) {
-                logger.warn(() -> new ParameterizedMessage("task [{}] failed with an exception", getPersistentTaskId()), exception);
+            if (failure != null) {
+                logger.warn(() -> "task [" + getPersistentTaskId() + "] failed with an exception", failure);
             } else if (localAbortReason != null) {
                 logger.debug("task [{}] aborted locally: [{}]", getPersistentTaskId(), localAbortReason);
             }
             try {
-                this.failure = exception;
+                this.failure = failure;
                 if (prevState == State.STARTED) {
                     logger.trace("sending notification for completed task [{}] with id [{}]", getAction(), getPersistentTaskId());
                     persistentTasksService.sendCompletionRequest(
                         getPersistentTaskId(),
                         getAllocationId(),
-                        exception,
+                        failure,
                         localAbortReason,
                         new ActionListener<PersistentTasksCustomMetadata.PersistentTask<?>>() {
                             @Override
@@ -208,11 +209,7 @@ public class AllocatedPersistentTask extends CancellableTask {
                             @Override
                             public void onFailure(Exception e) {
                                 logger.warn(
-                                    () -> new ParameterizedMessage(
-                                        "notification for task [{}] with id [{}] failed",
-                                        getAction(),
-                                        getPersistentTaskId()
-                                    ),
+                                    () -> format("notification for task [%s] with id [%s] failed", getAction(), getPersistentTaskId()),
                                     e
                                 );
                             }

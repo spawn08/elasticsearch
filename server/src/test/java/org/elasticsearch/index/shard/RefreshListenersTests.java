@@ -24,10 +24,10 @@ import org.elasticsearch.common.metrics.MeanMetric;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.util.BigArrays;
 import org.elasticsearch.common.util.concurrent.ThreadContext;
+import org.elasticsearch.core.IOUtils;
 import org.elasticsearch.core.Nullable;
 import org.elasticsearch.core.Releasable;
 import org.elasticsearch.core.TimeValue;
-import org.elasticsearch.core.internal.io.IOUtils;
 import org.elasticsearch.index.Index;
 import org.elasticsearch.index.IndexModule;
 import org.elasticsearch.index.IndexSettings;
@@ -40,6 +40,7 @@ import org.elasticsearch.index.mapper.IdFieldMapper;
 import org.elasticsearch.index.mapper.LuceneDocument;
 import org.elasticsearch.index.mapper.MapperService;
 import org.elasticsearch.index.mapper.ParsedDocument;
+import org.elasticsearch.index.mapper.ProvidedIdFieldMapper;
 import org.elasticsearch.index.mapper.SeqNoFieldMapper;
 import org.elasticsearch.index.mapper.Uid;
 import org.elasticsearch.index.seqno.RetentionLeases;
@@ -136,7 +137,7 @@ public class RefreshListenersTests extends ESTestCase {
             newMergePolicy(),
             iwc.getAnalyzer(),
             iwc.getSimilarity(),
-            new CodecService(null),
+            new CodecService(null, BigArrays.NON_RECYCLING_INSTANCE),
             eventListener,
             IndexSearcher.getDefaultQueryCache(),
             IndexSearcher.getDefaultQueryCachingPolicy(),
@@ -150,6 +151,8 @@ public class RefreshListenersTests extends ESTestCase {
             () -> RetentionLeases.EMPTY,
             () -> primaryTerm,
             IndexModule.DEFAULT_SNAPSHOT_COMMIT_SUPPLIER,
+            null,
+            System::nanoTime,
             null
         );
         engine = new InternalEngine(config);
@@ -399,7 +402,7 @@ public class RefreshListenersTests extends ESTestCase {
         // These threads add and block until the refresh makes the change visible and then do a non-realtime get.
         Thread[] indexers = new Thread[threadCount];
         for (int thread = 0; thread < threadCount; thread++) {
-            final String threadId = String.format(Locale.ROOT, "%04d", thread);
+            final String threadId = formatted("%04d", thread);
             indexers[thread] = new Thread(() -> {
                 for (int iteration = 1; iteration <= 50; iteration++) {
                     try {
@@ -537,14 +540,12 @@ public class RefreshListenersTests extends ESTestCase {
         final Term uid = new Term(IdFieldMapper.NAME, Uid.encodeId(id));
         LuceneDocument document = new LuceneDocument();
         document.add(new TextField("test", testFieldValue, Field.Store.YES));
-        Field idField = new Field(uid.field(), uid.bytes(), IdFieldMapper.Defaults.FIELD_TYPE);
+        Field idField = new Field(uid.field(), uid.bytes(), ProvidedIdFieldMapper.Defaults.FIELD_TYPE);
         Field versionField = new NumericDocValuesField("_version", Versions.MATCH_ANY);
         SeqNoFieldMapper.SequenceIDFields seqID = SeqNoFieldMapper.SequenceIDFields.emptySeqID();
         document.add(idField);
         document.add(versionField);
-        document.add(seqID.seqNo);
-        document.add(seqID.seqNoDocValue);
-        document.add(seqID.primaryTerm);
+        seqID.addFields(document);
         BytesReference source = new BytesArray(new byte[] { 1 });
         ParsedDocument doc = new ParsedDocument(versionField, seqID, id, null, Arrays.asList(document), source, XContentType.JSON, null);
         Engine.Index index = new Engine.Index(uid, engine.config().getPrimaryTermSupplier().getAsLong(), doc);

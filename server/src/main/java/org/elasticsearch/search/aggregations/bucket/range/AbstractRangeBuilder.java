@@ -60,6 +60,11 @@ public abstract class AbstractRangeBuilder<AB extends AbstractRangeBuilder<AB, R
     }
 
     @Override
+    public boolean supportsSampling() {
+        return true;
+    }
+
+    @Override
     protected ValuesSourceType defaultValueSourceType() {
         // Copied over from the old targetValueType setting. Not sure what cases this is still relevant for. --Tozzi 2020-01-13
         return rangeFactory.getValueSourceType();
@@ -70,15 +75,18 @@ public abstract class AbstractRangeBuilder<AB extends AbstractRangeBuilder<AB, R
      * and to of each range. The ranges are also sorted before being returned.
      */
     protected Range[] processRanges(Function<Range, Range> rangeProcessor) {
-        Range[] processedRanges = new Range[this.ranges.size()];
-        for (int i = 0; i < processedRanges.length; i++) {
-            processedRanges[i] = rangeProcessor.apply(this.ranges.get(i));
+        Range[] ranges = new Range[this.ranges.size()];
+        for (int i = 0; i < ranges.length; i++) {
+            ranges[i] = rangeProcessor.apply(this.ranges.get(i));
         }
-        sortRanges(processedRanges);
-        return processedRanges;
+        sortRanges(ranges);
+        return ranges;
     }
 
-    private static void sortRanges(final Range[] ranges) {
+    /**
+     * Sort the provided ranges in place.
+     */
+    static void sortRanges(final Range[] ranges) {
         new InPlaceMergeSorter() {
 
             @Override
@@ -101,10 +109,7 @@ public abstract class AbstractRangeBuilder<AB extends AbstractRangeBuilder<AB, R
 
     @Override
     protected void innerWriteTo(StreamOutput out) throws IOException {
-        out.writeVInt(ranges.size());
-        for (Range range : ranges) {
-            range.writeTo(out);
-        }
+        out.writeList(ranges);
         out.writeBoolean(keyed);
     }
 

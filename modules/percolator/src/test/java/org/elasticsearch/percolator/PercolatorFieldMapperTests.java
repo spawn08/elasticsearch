@@ -112,6 +112,7 @@ import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.instanceOf;
 
+//TODO migrate tests that don't require a node to a unit test that subclasses MapperTestCase
 public class PercolatorFieldMapperTests extends ESSingleNodeTestCase {
 
     private String fieldName;
@@ -823,7 +824,7 @@ public class PercolatorFieldMapperTests extends ESSingleNodeTestCase {
             MapperParsingException.class,
             () -> mapperService.parseMapping("type1", new CompressedXContent(mapping))
         );
-        assertThat(e.getMessage(), containsString("name cannot be empty string"));
+        assertThat(e.getMessage(), containsString("field name cannot be an empty string"));
     }
 
     public void testImplicitlySetDefaultScriptLang() throws Exception {
@@ -921,31 +922,29 @@ public class PercolatorFieldMapperTests extends ESSingleNodeTestCase {
             final int randomFrom = randomInt();
             final byte[] encodedFrom;
             switch (encodingType) {
-                case 0:
+                case 0 -> {
                     encodedFrom = new byte[Integer.BYTES];
                     IntPoint.encodeDimension(randomFrom, encodedFrom, 0);
-                    break;
-                case 1:
+                }
+                case 1 -> {
                     encodedFrom = new byte[Long.BYTES];
                     LongPoint.encodeDimension(randomFrom, encodedFrom, 0);
-                    break;
-                default:
-                    throw new AssertionError("unexpected encoding type [" + encodingType + "]");
+                }
+                default -> throw new AssertionError("unexpected encoding type [" + encodingType + "]");
             }
 
             final int randomTo = randomIntBetween(randomFrom, Integer.MAX_VALUE);
             final byte[] encodedTo;
             switch (encodingType) {
-                case 0:
+                case 0 -> {
                     encodedTo = new byte[Integer.BYTES];
                     IntPoint.encodeDimension(randomTo, encodedTo, 0);
-                    break;
-                case 1:
+                }
+                case 1 -> {
                     encodedTo = new byte[Long.BYTES];
                     LongPoint.encodeDimension(randomTo, encodedTo, 0);
-                    break;
-                default:
-                    throw new AssertionError("unexpected encoding type [" + encodingType + "]");
+                }
+                default -> throw new AssertionError("unexpected encoding type [" + encodingType + "]");
             }
 
             String randomFieldName = randomAlphaOfLength(5);
@@ -957,20 +956,19 @@ public class PercolatorFieldMapperTests extends ESSingleNodeTestCase {
             MurmurHash3.hash128(fieldAsBytesRef.bytes, fieldAsBytesRef.offset, fieldAsBytesRef.length, 0, hash);
 
             switch (encodingType) {
-                case 0:
+                case 0 -> {
                     assertEquals(hash.h1, ByteBuffer.wrap(subByteArray(result, 0, 8)).getLong());
                     assertEquals(randomFrom, IntPoint.decodeDimension(subByteArray(result, 12, 4), 0));
                     assertEquals(hash.h1, ByteBuffer.wrap(subByteArray(result, 16, 8)).getLong());
                     assertEquals(randomTo, IntPoint.decodeDimension(subByteArray(result, 28, 4), 0));
-                    break;
-                case 1:
+                }
+                case 1 -> {
                     assertEquals(hash.h1, ByteBuffer.wrap(subByteArray(result, 0, 8)).getLong());
                     assertEquals(randomFrom, LongPoint.decodeDimension(subByteArray(result, 8, 8), 0));
                     assertEquals(hash.h1, ByteBuffer.wrap(subByteArray(result, 16, 8)).getLong());
                     assertEquals(randomTo, LongPoint.decodeDimension(subByteArray(result, 24, 8), 0));
-                    break;
-                default:
-                    throw new AssertionError("unexpected encoding type [" + encodingType + "]");
+                }
+                default -> throw new AssertionError("unexpected encoding type [" + encodingType + "]");
             }
         }
     }

@@ -43,15 +43,14 @@ import java.util.Set;
 
 import static org.elasticsearch.action.ValidateActions.addValidationError;
 import static org.elasticsearch.common.settings.Settings.readSettingsFromStream;
-import static org.elasticsearch.common.settings.Settings.writeSettingsToStream;
 
 /**
- * A request to create an index. Best created with {@link org.elasticsearch.client.Requests#createIndexRequest(String)}.
+ * A request to create an index. Best created with {@link org.elasticsearch.client.internal.Requests#createIndexRequest(String)}.
  * <p>
  * The index created can optionally be created with {@link #settings(org.elasticsearch.common.settings.Settings)}.
  *
- * @see org.elasticsearch.client.IndicesAdminClient#create(CreateIndexRequest)
- * @see org.elasticsearch.client.Requests#createIndexRequest(String)
+ * @see org.elasticsearch.client.internal.IndicesAdminClient#create(CreateIndexRequest)
+ * @see org.elasticsearch.client.internal.Requests#createIndexRequest(String)
  * @see CreateIndexResponse
  */
 public class CreateIndexRequest extends AcknowledgedRequest<CreateIndexRequest> implements IndicesRequest {
@@ -395,8 +394,8 @@ public class CreateIndexRequest extends AcknowledgedRequest<CreateIndexRequest> 
                 }
                 settings((Map<String, Object>) entry.getValue());
             } else if (MAPPINGS.match(name, deprecationHandler)) {
-                Map<String, Object> typeToMappings = (Map<String, Object>) entry.getValue();
-                for (Map.Entry<String, Object> entry1 : typeToMappings.entrySet()) {
+                Map<String, Object> mappings = (Map<String, Object>) entry.getValue();
+                for (Map.Entry<String, Object> entry1 : mappings.entrySet()) {
                     mapping(entry1.getKey(), (Map<String, Object>) entry1.getValue());
                 }
             } else if (ALIASES.match(name, deprecationHandler)) {
@@ -453,7 +452,7 @@ public class CreateIndexRequest extends AcknowledgedRequest<CreateIndexRequest> 
         super.writeTo(out);
         out.writeString(cause);
         out.writeString(index);
-        writeSettingsToStream(settings, out);
+        settings.writeTo(out);
         if (out.getVersion().before(Version.V_8_0_0)) {
             if ("{}".equals(mappings)) {
                 out.writeVInt(0);
@@ -465,10 +464,7 @@ public class CreateIndexRequest extends AcknowledgedRequest<CreateIndexRequest> 
         } else {
             out.writeString(mappings);
         }
-        out.writeVInt(aliases.size());
-        for (Alias alias : aliases) {
-            alias.writeTo(out);
-        }
+        out.writeCollection(aliases);
         waitForActiveShards.writeTo(out);
         if (out.getVersion().onOrAfter(Version.V_7_12_0)) {
             out.writeString(origin);

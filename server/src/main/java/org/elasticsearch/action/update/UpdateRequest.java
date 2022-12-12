@@ -150,7 +150,7 @@ public class UpdateRequest extends InstanceShardOperationRequest<UpdateRequest>
         if (in.readBoolean()) {
             doc = new IndexRequest(shardId, in);
         }
-        fetchSourceContext = in.readOptionalWriteable(FetchSourceContext::new);
+        fetchSourceContext = in.readOptionalWriteable(FetchSourceContext::readFrom);
         if (in.readBoolean()) {
             upsertRequest = new IndexRequest(shardId, in);
         }
@@ -343,6 +343,7 @@ public class UpdateRequest extends InstanceShardOperationRequest<UpdateRequest>
      */
     @Deprecated
     public UpdateRequest addScriptParam(String name, Object value) {
+        Script script = script();
         if (script == null) {
             HashMap<String, Object> scriptParams = new HashMap<>();
             scriptParams.put(name, value);
@@ -372,6 +373,7 @@ public class UpdateRequest extends InstanceShardOperationRequest<UpdateRequest>
     }
 
     private void updateOrCreateScript(String scriptContent, ScriptType type, String lang, Map<String, Object> params) {
+        Script script = script();
         if (script == null) {
             script = new Script(type == null ? ScriptType.INLINE : type, lang, scriptContent == null ? "" : scriptContent, params);
         } else {
@@ -440,7 +442,7 @@ public class UpdateRequest extends InstanceShardOperationRequest<UpdateRequest>
         FetchSourceContext context = this.fetchSourceContext == null ? FetchSourceContext.FETCH_SOURCE : this.fetchSourceContext;
         String[] includes = include == null ? Strings.EMPTY_ARRAY : new String[] { include };
         String[] excludes = exclude == null ? Strings.EMPTY_ARRAY : new String[] { exclude };
-        this.fetchSourceContext = new FetchSourceContext(context.fetchSource(), includes, excludes);
+        this.fetchSourceContext = FetchSourceContext.of(context.fetchSource(), includes, excludes);
         return this;
     }
 
@@ -458,7 +460,7 @@ public class UpdateRequest extends InstanceShardOperationRequest<UpdateRequest>
      */
     public UpdateRequest fetchSource(@Nullable String[] includes, @Nullable String[] excludes) {
         FetchSourceContext context = this.fetchSourceContext == null ? FetchSourceContext.FETCH_SOURCE : this.fetchSourceContext;
-        this.fetchSourceContext = new FetchSourceContext(context.fetchSource(), includes, excludes);
+        this.fetchSourceContext = FetchSourceContext.of(context.fetchSource(), includes, excludes);
         return this;
     }
 
@@ -467,7 +469,7 @@ public class UpdateRequest extends InstanceShardOperationRequest<UpdateRequest>
      */
     public UpdateRequest fetchSource(boolean fetchSource) {
         FetchSourceContext context = this.fetchSourceContext == null ? FetchSourceContext.FETCH_SOURCE : this.fetchSourceContext;
-        this.fetchSourceContext = new FetchSourceContext(fetchSource, context.includes(), context.excludes());
+        this.fetchSourceContext = FetchSourceContext.of(fetchSource, context.includes(), context.excludes());
         return this;
     }
 
@@ -830,7 +832,7 @@ public class UpdateRequest extends InstanceShardOperationRequest<UpdateRequest>
     }
 
     @Override
-    public void process() {
+    public void process(IndexRouting indexRouting) {
         // Nothing to do
     }
 
