@@ -6,7 +6,7 @@
  */
 package org.elasticsearch.xpack.core.ilm;
 
-import org.elasticsearch.Version;
+import org.elasticsearch.TransportVersion;
 import org.elasticsearch.cluster.Diff;
 import org.elasticsearch.cluster.DiffableUtils;
 import org.elasticsearch.cluster.NamedDiff;
@@ -86,6 +86,10 @@ public class IndexLifecycleMetadata implements Metadata.Custom {
         return policyMetadatas;
     }
 
+    /**
+     * @deprecated use {@link LifecycleOperationMetadata#getILMOperationMode()} instead. This may be incorrect.
+     */
+    @Deprecated(since = "8.7.0")
     public OperationMode getOperationMode() {
         return operationMode;
     }
@@ -111,8 +115,8 @@ public class IndexLifecycleMetadata implements Metadata.Custom {
     }
 
     @Override
-    public Version getMinimalSupportedVersion() {
-        return Version.CURRENT.minimumCompatibilityVersion();
+    public TransportVersion getMinimalSupportedVersion() {
+        return TransportVersion.CURRENT.minimumCompatibilityVersion();
     }
 
     @Override
@@ -187,8 +191,8 @@ public class IndexLifecycleMetadata implements Metadata.Custom {
         }
 
         @Override
-        public Version getMinimalSupportedVersion() {
-            return Version.CURRENT.minimumCompatibilityVersion();
+        public TransportVersion getMinimalSupportedVersion() {
+            return TransportVersion.CURRENT.minimumCompatibilityVersion();
         }
 
         static Diff<LifecyclePolicyMetadata> readLifecyclePolicyDiffFrom(StreamInput in) throws IOException {

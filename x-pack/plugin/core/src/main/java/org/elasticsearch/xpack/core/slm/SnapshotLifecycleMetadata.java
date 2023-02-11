@@ -7,7 +7,7 @@
 
 package org.elasticsearch.xpack.core.slm;
 
-import org.elasticsearch.Version;
+import org.elasticsearch.TransportVersion;
 import org.elasticsearch.cluster.Diff;
 import org.elasticsearch.cluster.DiffableUtils;
 import org.elasticsearch.cluster.NamedDiff;
@@ -21,6 +21,7 @@ import org.elasticsearch.common.xcontent.ChunkedToXContentHelper;
 import org.elasticsearch.xcontent.ConstructingObjectParser;
 import org.elasticsearch.xcontent.ParseField;
 import org.elasticsearch.xcontent.ToXContent;
+import org.elasticsearch.xpack.core.ilm.LifecycleOperationMetadata;
 import org.elasticsearch.xpack.core.ilm.OperationMode;
 
 import java.io.IOException;
@@ -99,6 +100,10 @@ public class SnapshotLifecycleMetadata implements Metadata.Custom {
         return Collections.unmodifiableMap(this.snapshotConfigurations);
     }
 
+    /**
+     * @deprecated use {@link LifecycleOperationMetadata#getSLMOperationMode()} instead. This may be incorrect.
+     */
+    @Deprecated(since = "8.7.0")
     public OperationMode getOperationMode() {
         return operationMode;
     }
@@ -123,8 +128,8 @@ public class SnapshotLifecycleMetadata implements Metadata.Custom {
     }
 
     @Override
-    public Version getMinimalSupportedVersion() {
-        return Version.V_7_4_0;
+    public TransportVersion getMinimalSupportedVersion() {
+        return TransportVersion.V_7_4_0;
     }
 
     @Override
@@ -222,8 +227,8 @@ public class SnapshotLifecycleMetadata implements Metadata.Custom {
         }
 
         @Override
-        public Version getMinimalSupportedVersion() {
-            return Version.V_7_4_0;
+        public TransportVersion getMinimalSupportedVersion() {
+            return TransportVersion.V_7_4_0;
         }
 
     }
