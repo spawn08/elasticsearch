@@ -49,6 +49,7 @@ import org.elasticsearch.env.Environment;
 import org.elasticsearch.env.NodeEnvironment;
 import org.elasticsearch.index.analysis.CharFilterFactory;
 import org.elasticsearch.index.analysis.TokenizerFactory;
+import org.elasticsearch.index.query.QueryBuilder;
 import org.elasticsearch.indices.AssociatedIndexDescriptor;
 import org.elasticsearch.indices.SystemIndexDescriptor;
 import org.elasticsearch.indices.analysis.AnalysisModule.AnalysisProvider;
@@ -65,6 +66,7 @@ import org.elasticsearch.persistent.PersistentTaskState;
 import org.elasticsearch.persistent.PersistentTasksExecutor;
 import org.elasticsearch.plugins.AnalysisPlugin;
 import org.elasticsearch.plugins.CircuitBreakerPlugin;
+import org.elasticsearch.plugins.ExtensiblePlugin;
 import org.elasticsearch.plugins.IngestPlugin;
 import org.elasticsearch.plugins.PersistentTaskPlugin;
 import org.elasticsearch.plugins.Plugin;
@@ -363,6 +365,7 @@ import org.elasticsearch.xpack.ml.process.MlControllerHolder;
 import org.elasticsearch.xpack.ml.process.MlMemoryTracker;
 import org.elasticsearch.xpack.ml.process.NativeController;
 import org.elasticsearch.xpack.ml.process.NativeStorageProvider;
+import org.elasticsearch.xpack.ml.queries.TextExpansionQueryBuilder;
 import org.elasticsearch.xpack.ml.rest.RestDeleteExpiredDataAction;
 import org.elasticsearch.xpack.ml.rest.RestMlInfoAction;
 import org.elasticsearch.xpack.ml.rest.RestMlMemoryAction;
@@ -472,7 +475,8 @@ public class MachineLearning extends Plugin
         IngestPlugin,
         PersistentTaskPlugin,
         SearchPlugin,
-        ShutdownAwarePlugin {
+        ShutdownAwarePlugin,
+        ExtensiblePlugin {
     public static final String NAME = "ml";
     public static final String BASE_PATH = "/_ml/";
     // Endpoints that were deprecated in 7.x can still be called in 8.x using the REST compatibility layer
@@ -548,10 +552,21 @@ public class MachineLearning extends Plugin
         InferenceProcessor.Factory inferenceFactory = new InferenceProcessor.Factory(
             parameters.client,
             parameters.ingestService.getClusterService(),
-            this.settings
+            this.settings,
+            machineLearningExtension.get().includeNodeInfo()
         );
         parameters.ingestService.addIngestClusterStateListener(inferenceFactory);
         return Collections.singletonMap(InferenceProcessor.TYPE, inferenceFactory);
+    }
+
+    @Override
+    public void loadExtensions(ExtensionLoader loader) {
+        if (loader != null) {
+            loader.loadExtensions(MachineLearningExtension.class).forEach(machineLearningExtension::set);
+        }
+        if (machineLearningExtension.get() == null) {
+            machineLearningExtension.set(new DefaultMachineLearningExtension());
+        }
     }
 
     // This is not used in v8 and higher, but users are still prevented from setting it directly to avoid confusion
@@ -722,6 +737,8 @@ public class MachineLearning extends Plugin
     private final SetOnce<DeploymentManager> deploymentManager = new SetOnce<>();
     private final SetOnce<TrainedModelAssignmentClusterService> trainedModelAllocationClusterServiceSetOnce = new SetOnce<>();
 
+    private final SetOnce<MachineLearningExtension> machineLearningExtension = new SetOnce<>();
+
     public MachineLearning(Settings settings) {
         this.settings = settings;
         this.enabled = XPackSettings.MACHINE_LEARNING_ENABLED.get(settings);
@@ -860,12 +877,27 @@ public class MachineLearning extends Plugin
 
         this.mlUpgradeModeActionFilter.set(new MlUpgradeModeActionFilter(clusterService));
 
-        MlIndexTemplateRegistry registry = new MlIndexTemplateRegistry(settings, clusterService, threadPool, client, xContentRegistry);
+        MlIndexTemplateRegistry registry = new MlIndexTemplateRegistry(
+            settings,
+            clusterService,
+            threadPool,
+            client,
+            machineLearningExtension.get().useIlm(),
+            xContentRegistry
+        );
         registry.initialize();
 
-        AnomalyDetectionAuditor anomalyDetectionAuditor = new AnomalyDetectionAuditor(client, clusterService);
-        DataFrameAnalyticsAuditor dataFrameAnalyticsAuditor = new DataFrameAnalyticsAuditor(client, clusterService);
-        InferenceAuditor inferenceAuditor = new InferenceAuditor(client, clusterService);
+        AnomalyDetectionAuditor anomalyDetectionAuditor = new AnomalyDetectionAuditor(
+            client,
+            clusterService,
+            machineLearningExtension.get().includeNodeInfo()
+        );
+        DataFrameAnalyticsAuditor dataFrameAnalyticsAuditor = new DataFrameAnalyticsAuditor(
+            client,
+            clusterService,
+            machineLearningExtension.get().includeNodeInfo()
+        );
+        InferenceAuditor inferenceAuditor = new InferenceAuditor(client, clusterService, machineLearningExtension.get().includeNodeInfo());
         this.dataFrameAnalyticsAuditor.set(dataFrameAnalyticsAuditor);
         OriginSettingClient originSettingClient = new OriginSettingClient(client, ML_ORIGIN);
         ResultsPersisterService resultsPersisterService = new ResultsPersisterService(
@@ -1210,7 +1242,8 @@ public class MachineLearning extends Plugin
                 memoryTracker.get(),
                 client,
                 expressionResolver,
-                getLicenseState()
+                getLicenseState(),
+                machineLearningExtension.get().includeNodeInfo()
             ),
             new TransportStartDatafeedAction.StartDatafeedPersistentTasksExecutor(datafeedRunner.get(), expressionResolver),
             new TransportStartDataFrameAnalyticsAction.TaskExecutor(
@@ -1230,7 +1263,8 @@ public class MachineLearning extends Plugin
                 memoryTracker.get(),
                 expressionResolver,
                 client,
-                getLicenseState()
+                getLicenseState(),
+                machineLearningExtension.get().includeNodeInfo()
             )
         );
     }
@@ -1556,7 +1590,18 @@ public class MachineLearning extends Plugin
             new QueryVectorBuilderSpec<>(
                 TextEmbeddingQueryVectorBuilder.NAME,
                 TextEmbeddingQueryVectorBuilder::new,
-                TextEmbeddingQueryVectorBuilder.PARSER::apply
+                TextEmbeddingQueryVectorBuilder.PARSER
+            )
+        );
+    }
+
+    @Override
+    public List<QuerySpec<?>> getQueries() {
+        return List.of(
+            new QuerySpec<QueryBuilder>(
+                TextExpansionQueryBuilder.NAME,
+                TextExpansionQueryBuilder::new,
+                TextExpansionQueryBuilder::fromXContent
             )
         );
     }
@@ -1853,6 +1898,12 @@ public class MachineLearning extends Plugin
         Client unwrappedClient,
         ActionListener<ResetFeatureStateResponse.ResetFeatureStateStatus> finalListener
     ) {
+        if (this.enabled == false) {
+            // if ML is disabled, the custom cleanup can fail, but we can still clean up indices
+            // by calling the superclass cleanup method
+            SystemIndexPlugin.super.cleanUpFeature(clusterService, unwrappedClient, finalListener);
+            return;
+        }
         logger.info("Starting machine learning feature reset");
         OriginSettingClient client = new OriginSettingClient(unwrappedClient, ML_ORIGIN);
 

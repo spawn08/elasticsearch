@@ -21,6 +21,7 @@ import org.elasticsearch.action.admin.indices.stats.CommonStats;
 import org.elasticsearch.action.admin.indices.stats.CommonStatsFlags;
 import org.elasticsearch.action.admin.indices.stats.ShardStats;
 import org.elasticsearch.cluster.ClusterName;
+import org.elasticsearch.cluster.ClusterSnapshotStats;
 import org.elasticsearch.cluster.ClusterState;
 import org.elasticsearch.cluster.health.ClusterHealthStatus;
 import org.elasticsearch.cluster.metadata.Metadata;
@@ -31,6 +32,7 @@ import org.elasticsearch.cluster.routing.RecoverySource;
 import org.elasticsearch.cluster.routing.ShardRouting;
 import org.elasticsearch.cluster.routing.UnassignedInfo;
 import org.elasticsearch.common.bytes.BytesReference;
+import org.elasticsearch.common.collect.Iterators;
 import org.elasticsearch.common.network.NetworkModule;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.transport.BoundTransportAddress;
@@ -310,7 +312,7 @@ public class ClusterStatsMonitoringDocTests extends BaseMonitoringDocTestCase<Cl
         final List<XPackFeatureSet.Usage> usageList = singletonList(new MonitoringFeatureSetUsage(false, null));
 
         final NodeInfo mockNodeInfo = mock(NodeInfo.class);
-        Version mockNodeVersion = Version.CURRENT.minimumIndexCompatibilityVersion();
+        Version mockNodeVersion = Version.CURRENT.minimumCompatibilityVersion();
         when(mockNodeInfo.getVersion()).thenReturn(mockNodeVersion);
         when(mockNodeInfo.getNode()).thenReturn(discoveryNode);
 
@@ -370,7 +372,7 @@ public class ClusterStatsMonitoringDocTests extends BaseMonitoringDocTestCase<Cl
 
         final FsInfo mockFsInfo = mock(FsInfo.class);
         when(mockNodeStats.getFs()).thenReturn(mockFsInfo);
-        when(mockFsInfo.getTotal()).thenReturn(new FsInfo.Path("_fs_path", "_fs_mount", 100L, 49L, 51L));
+        when(mockFsInfo.iterator()).thenReturn(Iterators.single(new FsInfo.Path("_fs_path", "_fs_mount", 100L, 49L, 51L)));
 
         final OsStats mockOsStats = mock(OsStats.class);
         when(mockNodeStats.getOs()).thenReturn(mockOsStats);
@@ -424,7 +426,8 @@ public class ClusterStatsMonitoringDocTests extends BaseMonitoringDocTestCase<Cl
             emptyList(),
             MappingStats.of(metadata, () -> {}),
             AnalysisStats.of(metadata, () -> {}),
-            VersionStats.of(metadata, singletonList(mockNodeResponse))
+            VersionStats.of(metadata, singletonList(mockNodeResponse)),
+            ClusterSnapshotStats.EMPTY
         );
 
         final MonitoringDoc.Node node = new MonitoringDoc.Node("_uuid", "_host", "_addr", "_ip", "_name", 1504169190855L);
@@ -719,6 +722,16 @@ public class ClusterStatsMonitoringDocTests extends BaseMonitoringDocTestCase<Cl
                       "limit_in_bytes": 0
                     }
                   }
+                },
+                "snapshots": {
+                  "current_counts": {
+                    "snapshots": 0,
+                    "shard_snapshots": 0,
+                    "snapshot_deletions": 0,
+                    "concurrent_operations": 0,
+                    "cleanups": 0
+                  },
+                  "repositories": {}
                 }
               },
               "cluster_state": {
@@ -742,7 +755,8 @@ public class ClusterStatsMonitoringDocTests extends BaseMonitoringDocTestCase<Cl
                     ],
                     "version": "%s"
                   }
-                }
+                },
+                "transport_versions": []
               },
               "cluster_settings": {
                 "cluster": {
