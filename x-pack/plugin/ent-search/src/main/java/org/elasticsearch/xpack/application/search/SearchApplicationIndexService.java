@@ -8,6 +8,7 @@
 package org.elasticsearch.xpack.application.search;
 
 import org.elasticsearch.ElasticsearchParseException;
+import org.elasticsearch.ExceptionsHelper;
 import org.elasticsearch.ResourceNotFoundException;
 import org.elasticsearch.TransportVersion;
 import org.elasticsearch.Version;
@@ -33,6 +34,7 @@ import org.elasticsearch.client.internal.OriginSettingClient;
 import org.elasticsearch.cluster.metadata.IndexMetadata;
 import org.elasticsearch.cluster.metadata.Metadata;
 import org.elasticsearch.cluster.service.ClusterService;
+import org.elasticsearch.common.ValidationException;
 import org.elasticsearch.common.bytes.BytesReference;
 import org.elasticsearch.common.document.DocumentField;
 import org.elasticsearch.common.io.stream.InputStreamStreamInput;
@@ -228,8 +230,9 @@ public class SearchApplicationIndexService {
             public void onFailure(Exception e) {
                 // Convert index not found failure from the alias API into an illegal argument
                 Exception failException = e;
-                if (e instanceof IndexNotFoundException) {
-                    failException = new IllegalArgumentException(e.getMessage(), e);
+                Throwable cause = ExceptionsHelper.unwrapCause(e);
+                if (cause instanceof IndexNotFoundException) {
+                    failException = new IllegalArgumentException(cause.getMessage(), cause);
                 }
                 listener.onFailure(failException);
             }
@@ -283,7 +286,7 @@ public class SearchApplicationIndexService {
                     .field(SearchApplication.UPDATED_AT_MILLIS_FIELD.getPreferredName(), app.updatedAtMillis())
                     .directFieldAsBase64(
                         SearchApplication.BINARY_CONTENT_FIELD.getPreferredName(),
-                        os -> writeSearchApplicationBinaryWithVersion(app, os, clusterService.state().nodes().getMinNodeVersion())
+                        os -> writeSearchApplicationBinaryWithVersion(app, os, clusterService.state().getMinTransportVersion())
                     )
                     .endObject();
             }
@@ -453,22 +456,25 @@ public class SearchApplicationIndexService {
             throw new ElasticsearchParseException("[" + SearchApplication.BINARY_CONTENT_FIELD.getPreferredName() + "] field is missing");
         } catch (IOException e) {
             throw new ElasticsearchParseException("Failed to parse: " + source.utf8ToString(), e);
+        } catch (ValidationException e) {
+            throw new ElasticsearchParseException("Invalid Search Application: " + source.utf8ToString(), e);
         }
     }
 
     static SearchApplication parseSearchApplicationBinaryWithVersion(StreamInput in) throws IOException {
         TransportVersion version = TransportVersion.readVersion(in);
-        assert version.onOrBefore(TransportVersion.CURRENT) : version + " >= " + TransportVersion.CURRENT;
+        assert version.onOrBefore(TransportVersion.current()) : version + " >= " + TransportVersion.current();
         in.setTransportVersion(version);
         return new SearchApplication(in);
     }
 
-    static void writeSearchApplicationBinaryWithVersion(SearchApplication app, OutputStream os, Version minNodeVersion) throws IOException {
+    static void writeSearchApplicationBinaryWithVersion(SearchApplication app, OutputStream os, TransportVersion minTransportVersion)
+        throws IOException {
         // do not close the output
         os = Streams.noCloseStream(os);
-        TransportVersion.writeVersion(minNodeVersion.transportVersion, new OutputStreamStreamOutput(os));
+        TransportVersion.writeVersion(minTransportVersion, new OutputStreamStreamOutput(os));
         try (OutputStreamStreamOutput out = new OutputStreamStreamOutput(os)) {
-            out.setTransportVersion(minNodeVersion.transportVersion);
+            out.setTransportVersion(minTransportVersion);
             app.writeTo(out);
         }
     }
@@ -491,8 +497,9 @@ public class SearchApplicationIndexService {
 
         @Override
         public void onFailure(Exception e) {
-            if (e instanceof IndexNotFoundException) {
-                delegate.onFailure(new ResourceNotFoundException(resourceName, e));
+            Throwable cause = ExceptionsHelper.unwrapCause(e);
+            if (cause instanceof IndexNotFoundException) {
+                delegate.onFailure(new ResourceNotFoundException(resourceName));
                 return;
             }
             delegate.onFailure(e);

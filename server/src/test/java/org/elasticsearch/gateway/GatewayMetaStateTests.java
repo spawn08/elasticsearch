@@ -182,7 +182,7 @@ public class GatewayMetaStateTests extends ESTestCase {
         private final boolean upgrade;
 
         MockIndexMetadataVerifier(boolean upgrade) {
-            super(Settings.EMPTY, null, null, null, null);
+            super(Settings.EMPTY, null, null, null, null, null);
             this.upgrade = upgrade;
         }
 
@@ -206,7 +206,7 @@ public class GatewayMetaStateTests extends ESTestCase {
 
         @Override
         public TransportVersion getMinimalSupportedVersion() {
-            return TransportVersion.CURRENT;
+            return TransportVersion.current();
         }
 
         @Override

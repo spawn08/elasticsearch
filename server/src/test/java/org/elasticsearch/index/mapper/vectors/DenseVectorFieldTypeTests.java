@@ -8,7 +8,10 @@
 
 package org.elasticsearch.index.mapper.vectors;
 
-import org.elasticsearch.Version;
+import org.apache.lucene.search.KnnByteVectorQuery;
+import org.apache.lucene.search.KnnFloatVectorQuery;
+import org.apache.lucene.search.Query;
+import org.elasticsearch.index.IndexVersion;
 import org.elasticsearch.index.fielddata.FieldDataContext;
 import org.elasticsearch.index.mapper.FieldTypeTestCase;
 import org.elasticsearch.index.mapper.MappedFieldType;
@@ -21,6 +24,7 @@ import java.util.List;
 import java.util.Set;
 
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.instanceOf;
 
 public class DenseVectorFieldTypeTests extends FieldTypeTestCase {
     private final boolean indexed;
@@ -32,7 +36,7 @@ public class DenseVectorFieldTypeTests extends FieldTypeTestCase {
     private DenseVectorFieldType createFloatFieldType() {
         return new DenseVectorFieldType(
             "f",
-            Version.CURRENT,
+            IndexVersion.CURRENT,
             DenseVectorFieldMapper.ElementType.FLOAT,
             5,
             indexed,
@@ -44,7 +48,7 @@ public class DenseVectorFieldTypeTests extends FieldTypeTestCase {
     private DenseVectorFieldType createByteFieldType() {
         return new DenseVectorFieldType(
             "f",
-            Version.CURRENT,
+            IndexVersion.CURRENT,
             DenseVectorFieldMapper.ElementType.BYTE,
             5,
             true,
@@ -109,7 +113,7 @@ public class DenseVectorFieldTypeTests extends FieldTypeTestCase {
     public void testFloatCreateKnnQuery() {
         DenseVectorFieldType unindexedField = new DenseVectorFieldType(
             "f",
-            Version.CURRENT,
+            IndexVersion.CURRENT,
             DenseVectorFieldMapper.ElementType.FLOAT,
             3,
             false,
@@ -124,7 +128,7 @@ public class DenseVectorFieldTypeTests extends FieldTypeTestCase {
 
         DenseVectorFieldType dotProductField = new DenseVectorFieldType(
             "f",
-            Version.CURRENT,
+            IndexVersion.CURRENT,
             DenseVectorFieldMapper.ElementType.FLOAT,
             3,
             true,
@@ -139,7 +143,7 @@ public class DenseVectorFieldTypeTests extends FieldTypeTestCase {
 
         DenseVectorFieldType cosineField = new DenseVectorFieldType(
             "f",
-            Version.CURRENT,
+            IndexVersion.CURRENT,
             DenseVectorFieldMapper.ElementType.FLOAT,
             3,
             true,
@@ -153,10 +157,48 @@ public class DenseVectorFieldTypeTests extends FieldTypeTestCase {
         assertThat(e.getMessage(), containsString("The [cosine] similarity does not support vectors with zero magnitude."));
     }
 
+    public void testCreateKnnQueryMaxDims() {
+        {   // float type with 2048 dims
+            DenseVectorFieldType fieldWith2048dims = new DenseVectorFieldType(
+                "f",
+                IndexVersion.CURRENT,
+                DenseVectorFieldMapper.ElementType.FLOAT,
+                2048,
+                true,
+                VectorSimilarity.COSINE,
+                Collections.emptyMap()
+            );
+            float[] queryVector = new float[2048];
+            for (int i = 0; i < 2048; i++) {
+                queryVector[i] = randomFloat();
+            }
+            Query query = fieldWith2048dims.createKnnQuery(queryVector, 10, null, null);
+            assertThat(query, instanceOf(KnnFloatVectorQuery.class));
+        }
+
+        {   // byte type with 2048 dims
+            DenseVectorFieldType fieldWith2048dims = new DenseVectorFieldType(
+                "f",
+                IndexVersion.CURRENT,
+                DenseVectorFieldMapper.ElementType.BYTE,
+                2048,
+                true,
+                VectorSimilarity.COSINE,
+                Collections.emptyMap()
+            );
+            byte[] queryVector = new byte[2048];
+            for (int i = 0; i < 2048; i++) {
+                queryVector[i] = randomByte();
+            }
+            Query query = fieldWith2048dims.createKnnQuery(queryVector, 10, null, null);
+            assertThat(query, instanceOf(KnnByteVectorQuery.class));
+        }
+    }
+
     public void testByteCreateKnnQuery() {
         DenseVectorFieldType unindexedField = new DenseVectorFieldType(
             "f",
-            Version.CURRENT,
+            IndexVersion.CURRENT,
             DenseVectorFieldMapper.ElementType.BYTE,
             3,
             false,
@@ -171,7 +213,7 @@ public class DenseVectorFieldTypeTests extends FieldTypeTestCase {
 
         DenseVectorFieldType cosineField = new DenseVectorFieldType(
             "f",
-            Version.CURRENT,
+            IndexVersion.CURRENT,
             DenseVectorFieldMapper.ElementType.BYTE,
             3,
             true,

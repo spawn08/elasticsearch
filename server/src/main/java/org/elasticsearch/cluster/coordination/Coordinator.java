@@ -252,7 +252,8 @@ public class Coordinator extends AbstractLifecycleComponent implements ClusterSt
             this::startElection,
             this::updateMaxTermSeen,
             electionStrategy,
-            nodeHealthService
+            nodeHealthService,
+            leaderHeartbeatService
         );
         configuredHostsResolver = new SeedHostsResolver(nodeName, settings, transportService, seedHostsProvider);
         this.peerFinder = new CoordinatorPeerFinder(
@@ -545,7 +546,11 @@ public class Coordinator extends AbstractLifecycleComponent implements ClusterSt
 
             @Override
             public void onFailure(Exception e) {
-                logger.debug(Strings.format("election attempt for [%s] in term [%d] failed", candidateMasterNode, term), e);
+                logger.log(
+                    e instanceof CoordinationStateRejectedException ? Level.DEBUG : Level.WARN,
+                    Strings.format("election attempt for [%s] in term [%d] failed", candidateMasterNode, term),
+                    e
+                );
             }
         });
     }
@@ -908,12 +913,17 @@ public class Coordinator extends AbstractLifecycleComponent implements ClusterSt
                 @Override
                 public void onFailure(Exception e) {
                     // TODO tests for heartbeat failures
-                    logger.debug(() -> Strings.format("heartbeat failure in term [%s]", leaderTerm), e);
+                    logger.warn(() -> Strings.format("failed to write heartbeat for term [%s]", leaderTerm), e);
                     synchronized (mutex) {
                         if (getCurrentTerm() == leaderTerm) {
                             becomeCandidate("leaderHeartbeatService");
                         }
                     }
+                }
+
+                @Override
+                public String toString() {
+                    return "term change heartbeat listener";
                 }
             })
         );
@@ -1055,7 +1065,7 @@ public class Coordinator extends AbstractLifecycleComponent implements ClusterSt
                         .addGlobalBlock(noMasterBlockService.getNoMasterBlock())
                 )
                 .nodes(DiscoveryNodes.builder().add(getLocalNode()).localNodeId(getLocalNode().getId()))
-                .putTransportVersion(getLocalNode().getId(), TransportVersion.CURRENT)
+                .putTransportVersion(getLocalNode().getId(), TransportVersion.current())
                 .metadata(metadata)
                 .build();
             applierState = initialState;
@@ -1459,8 +1469,7 @@ public class Coordinator extends AbstractLifecycleComponent implements ClusterSt
                 .blocks(clusterState.blocks())
                 .addGlobalBlock(noMasterBlockService.getNoMasterBlock())
                 .build();
-            final DiscoveryNodes discoveryNodes = new DiscoveryNodes.Builder(clusterState.nodes()).masterNodeId(null).build();
-            return ClusterState.builder(clusterState).blocks(clusterBlocks).nodes(discoveryNodes).build();
+            return ClusterState.builder(clusterState).blocks(clusterBlocks).nodes(clusterState.nodes().withMasterNodeId(null)).build();
         } else {
             return clusterState;
         }
@@ -1538,6 +1547,9 @@ public class Coordinator extends AbstractLifecycleComponent implements ClusterSt
                     followersChecker.setCurrentNodes(publishNodes);
                     lagDetector.setTrackedNodes(publishNodes);
                     publication.start(followersChecker.getFaultyNodes());
+                } catch (Exception e) {
+                    assert currentPublication.isEmpty() : e; // should not fail after setting currentPublication
+                    becomeCandidate("publish");
                 } finally {
                     publicationContext.decRef();
                 }
@@ -1940,7 +1952,15 @@ public class Coordinator extends AbstractLifecycleComponent implements ClusterSt
                     removePublicationAndPossiblyBecomeCandidate("Publication.onCompletion(false)");
                     cancelTimeoutHandlers();
 
-                    final FailedToCommitClusterStateException exception = new FailedToCommitClusterStateException("publication failed", e);
+                    final FailedToCommitClusterStateException exception = new FailedToCommitClusterStateException(
+                        Strings.format(
+                            "publication of cluster state version [%d] in term [%d] failed [committed={}]",
+                            publishRequest.getAcceptedState().version(),
+                            publishRequest.getAcceptedState().term(),
+                            committed
+                        ),
+                        e
+                    );
                     ackListener.onNodeAck(getLocalNode(), exception); // other nodes have acked, but not the master.
                     publishListener.onFailure(exception);
                 }
@@ -1968,15 +1988,32 @@ public class Coordinator extends AbstractLifecycleComponent implements ClusterSt
         }
 
         @Override
-        protected Optional<ListenableFuture<ApplyCommitRequest>> handlePublishResponse(
+        protected Optional<SubscribableListener<ApplyCommitRequest>> handlePublishResponse(
             DiscoveryNode sourceNode,
             PublishResponse publishResponse
         ) {
             assert Thread.holdsLock(mutex) : "Coordinator mutex not held";
             assert getCurrentTerm() >= publishResponse.getTerm();
             return coordinationState.get().handlePublishResponse(sourceNode, publishResponse).map(applyCommitRequest -> {
-                final var future = new ListenableFuture<ApplyCommitRequest>();
+                final var future = new SubscribableListener<ApplyCommitRequest>();
                 beforeCommit(applyCommitRequest.getTerm(), applyCommitRequest.getVersion(), future.map(ignored -> applyCommitRequest));
+                future.addListener(new ActionListener<>() {
+                    @Override
+                    public void onResponse(ApplyCommitRequest applyCommitRequest) {}
+
+                    @Override
+                    public void onFailure(Exception e) {
+                        logger.log(
+                            e instanceof CoordinationStateRejectedException ? Level.DEBUG : Level.WARN,
+                            Strings.format(
+                                "publication of cluster state version [%d] in term [%d] failed to commit after reaching quorum",
+                                publishRequest.getAcceptedState().version(),
+                                publishRequest.getAcceptedState().term()
+                            ),
+                            e
+                        );
+                    }
+                });
                 return future;
             });
         }

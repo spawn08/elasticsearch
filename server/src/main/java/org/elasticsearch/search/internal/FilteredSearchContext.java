@@ -8,7 +8,6 @@
 
 package org.elasticsearch.search.internal;
 
-import org.apache.lucene.search.Collector;
 import org.apache.lucene.search.FieldDoc;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.search.TotalHits;
@@ -34,6 +33,7 @@ import org.elasticsearch.search.fetch.subphase.ScriptFieldsContext;
 import org.elasticsearch.search.fetch.subphase.highlight.SearchHighlightContext;
 import org.elasticsearch.search.profile.Profilers;
 import org.elasticsearch.search.query.QuerySearchResult;
+import org.elasticsearch.search.rank.RankShardContext;
 import org.elasticsearch.search.rescore.RescoreContext;
 import org.elasticsearch.search.sort.SortAndFormats;
 import org.elasticsearch.search.suggest.SuggestionSearchContext;
@@ -141,6 +141,16 @@ public abstract class FilteredSearchContext extends SearchContext {
     @Override
     public void suggest(SuggestionSearchContext suggest) {
         in.suggest(suggest);
+    }
+
+    @Override
+    public RankShardContext rankShardContext() {
+        return in.rankShardContext();
+    }
+
+    @Override
+    public void rankShardContext(RankShardContext rankShardContext) {
+        in.rankShardContext(rankShardContext);
     }
 
     @Override
@@ -426,16 +436,6 @@ public abstract class FilteredSearchContext extends SearchContext {
     @Override
     public Profilers getProfilers() {
         return in.getProfilers();
-    }
-
-    @Override
-    public Collector getAggsCollector() {
-        return in.getAggsCollector();
-    }
-
-    @Override
-    public void registerAggsCollector(Collector collector) {
-        in.registerAggsCollector(collector);
     }
 
     @Override

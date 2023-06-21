@@ -20,13 +20,13 @@ import org.apache.lucene.index.IndexableFieldType;
 import org.apache.lucene.tests.analysis.MockLowerCaseFilter;
 import org.apache.lucene.tests.analysis.MockTokenizer;
 import org.apache.lucene.util.BytesRef;
-import org.elasticsearch.Version;
 import org.elasticsearch.cluster.metadata.IndexMetadata;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.lucene.Lucene;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.core.Tuple;
 import org.elasticsearch.index.IndexSettings;
+import org.elasticsearch.index.IndexVersion;
 import org.elasticsearch.index.analysis.AnalyzerScope;
 import org.elasticsearch.index.analysis.CharFilterFactory;
 import org.elasticsearch.index.analysis.CustomAnalyzer;
@@ -593,15 +593,16 @@ public class KeywordFieldMapperTests extends MapperTestCase {
     @Override
     protected String minimalIsInvalidRoutingPathErrorMessage(Mapper mapper) {
         return "All fields that match routing_path must be keywords with [time_series_dimension: true] "
-            + "and without the [script] parameter. ["
+            + "or flattened fields with a list of dimensions in [time_series_dimensions] and "
+            + "without the [script] parameter. ["
             + mapper.name()
-            + "] was not [time_series_dimension: true].";
+            + "] was not a dimension.";
     }
 
     public void testDimensionInRoutingPath() throws IOException {
         MapperService mapper = createMapperService(fieldMapping(b -> b.field("type", "keyword").field("time_series_dimension", true)));
         IndexSettings settings = createIndexSettings(
-            Version.CURRENT,
+            IndexVersion.CURRENT,
             Settings.builder()
                 .put(IndexSettings.MODE.getKey(), "time_series")
                 .put(IndexMetadata.INDEX_ROUTING_PATH.getKey(), "field")
@@ -626,7 +627,7 @@ public class KeywordFieldMapperTests extends MapperTestCase {
     }
 
     /**
-     * Test that we don't error on exceeding field size if field is neither indexed nor has doc values
+     * Test that we don't error on exceeding field size if field is neither indexed nor has doc values nor stored
      */
     public void testKeywordFieldUtf8LongerThan32766SourceOnly() throws Exception {
         DocumentMapper mapper = createDocumentMapper(fieldMapping(b -> {
@@ -772,7 +773,7 @@ public class KeywordFieldMapperTests extends MapperTestCase {
 
     public void testLegacyField() throws Exception {
         // check that unknown normalizers are treated leniently on old indices
-        MapperService service = createMapperService(Version.fromString("5.0.0"), Settings.EMPTY, () -> false, mapping(b -> {
+        MapperService service = createMapperService(IndexVersion.fromId(5000099), Settings.EMPTY, () -> false, mapping(b -> {
             b.startObject("mykeyw");
             b.field("type", "keyword");
             b.field("normalizer", "unknown-normalizer");

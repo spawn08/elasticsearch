@@ -31,6 +31,7 @@ import org.elasticsearch.common.util.Maps;
 import org.elasticsearch.common.util.concurrent.ThreadContext;
 import org.elasticsearch.core.Nullable;
 import org.elasticsearch.core.TimeValue;
+import org.elasticsearch.http.HttpPreRequest;
 import org.elasticsearch.node.Node;
 import org.elasticsearch.rest.RestRequest;
 import org.elasticsearch.tasks.Task;
@@ -43,17 +44,23 @@ import org.elasticsearch.xcontent.json.JsonStringEncoder;
 import org.elasticsearch.xcontent.json.JsonXContent;
 import org.elasticsearch.xpack.core.security.SecurityContext;
 import org.elasticsearch.xpack.core.security.action.Grant;
+import org.elasticsearch.xpack.core.security.action.apikey.AbstractCreateApiKeyRequest;
+import org.elasticsearch.xpack.core.security.action.apikey.BaseSingleUpdateApiKeyRequest;
 import org.elasticsearch.xpack.core.security.action.apikey.BaseUpdateApiKeyRequest;
 import org.elasticsearch.xpack.core.security.action.apikey.BulkUpdateApiKeyAction;
 import org.elasticsearch.xpack.core.security.action.apikey.BulkUpdateApiKeyRequest;
 import org.elasticsearch.xpack.core.security.action.apikey.CreateApiKeyAction;
 import org.elasticsearch.xpack.core.security.action.apikey.CreateApiKeyRequest;
+import org.elasticsearch.xpack.core.security.action.apikey.CreateCrossClusterApiKeyAction;
+import org.elasticsearch.xpack.core.security.action.apikey.CreateCrossClusterApiKeyRequest;
 import org.elasticsearch.xpack.core.security.action.apikey.GrantApiKeyAction;
 import org.elasticsearch.xpack.core.security.action.apikey.GrantApiKeyRequest;
 import org.elasticsearch.xpack.core.security.action.apikey.InvalidateApiKeyAction;
 import org.elasticsearch.xpack.core.security.action.apikey.InvalidateApiKeyRequest;
 import org.elasticsearch.xpack.core.security.action.apikey.UpdateApiKeyAction;
 import org.elasticsearch.xpack.core.security.action.apikey.UpdateApiKeyRequest;
+import org.elasticsearch.xpack.core.security.action.apikey.UpdateCrossClusterApiKeyAction;
+import org.elasticsearch.xpack.core.security.action.apikey.UpdateCrossClusterApiKeyRequest;
 import org.elasticsearch.xpack.core.security.action.privilege.DeletePrivilegesAction;
 import org.elasticsearch.xpack.core.security.action.privilege.DeletePrivilegesRequest;
 import org.elasticsearch.xpack.core.security.action.privilege.PutPrivilegesAction;
@@ -92,6 +99,7 @@ import org.elasticsearch.xpack.core.security.authz.AuthorizationEngine.Authoriza
 import org.elasticsearch.xpack.core.security.authz.RoleDescriptor;
 import org.elasticsearch.xpack.core.security.authz.privilege.ConfigurableClusterPrivileges;
 import org.elasticsearch.xpack.core.security.support.Automatons;
+import org.elasticsearch.xpack.core.security.user.InternalUser;
 import org.elasticsearch.xpack.core.security.user.User;
 import org.elasticsearch.xpack.security.Security;
 import org.elasticsearch.xpack.security.audit.AuditLevel;
@@ -298,7 +306,9 @@ public class LoggingAuditTrail implements AuditTrail, ClusterStateListener {
         UpdateProfileDataAction.NAME,
         SetProfileEnabledAction.NAME,
         UpdateApiKeyAction.NAME,
-        BulkUpdateApiKeyAction.NAME
+        BulkUpdateApiKeyAction.NAME,
+        CreateCrossClusterApiKeyAction.NAME,
+        UpdateCrossClusterApiKeyAction.NAME
     );
     private static final String FILTER_POLICY_PREFIX = setting("audit.logfile.events.ignore_filters.");
     // because of the default wildcard value (*) for the field filter, a policy with
@@ -455,7 +465,7 @@ public class LoggingAuditTrail implements AuditTrail, ClusterStateListener {
             authentication = securityContext.getAuthentication();
         } catch (Exception e) {
             logger.error(() -> format("caught exception while trying to read authentication from request [%s]", request), e);
-            tamperedRequest(requestId, request);
+            tamperedRequest(requestId, request.getHttpRequest());
             throw new ElasticsearchSecurityException("rest request attempted to inject a user", e);
         }
         if (authentication == null) {
@@ -480,7 +490,7 @@ public class LoggingAuditTrail implements AuditTrail, ClusterStateListener {
                 .with(EVENT_ACTION_FIELD_NAME, "authentication_success")
                 .with(REALM_FIELD_NAME, authnRealm)
                 // Not adding domain since "realm" field is considered redundant for bwc purposes
-                .withRestUriAndMethod(request)
+                .withRestUriAndMethod(request.getHttpRequest())
                 .withRequestId(requestId)
                 .withAuthentication(authentication)
                 .withRestOrigin(threadContext)
@@ -539,14 +549,13 @@ public class LoggingAuditTrail implements AuditTrail, ClusterStateListener {
     }
 
     @Override
-    public void anonymousAccessDenied(String requestId, RestRequest request) {
+    public void anonymousAccessDenied(String requestId, HttpPreRequest request) {
         if (events.contains(ANONYMOUS_ACCESS_DENIED)
             && eventFilterPolicyRegistry.ignorePredicate().test(AuditEventMetaInfo.EMPTY) == false) {
             new LogEntryBuilder().with(EVENT_TYPE_FIELD_NAME, REST_ORIGIN_FIELD_VALUE)
                 .with(EVENT_ACTION_FIELD_NAME, "anonymous_access_denied")
                 .withRestUriAndMethod(request)
                 .withRestOrigin(threadContext)
-                .withRequestBody(request)
                 .withRequestId(requestId)
                 .withThreadContext(threadContext)
                 .build();
@@ -577,13 +586,12 @@ public class LoggingAuditTrail implements AuditTrail, ClusterStateListener {
     }
 
     @Override
-    public void authenticationFailed(String requestId, RestRequest request) {
+    public void authenticationFailed(String requestId, HttpPreRequest request) {
         if (events.contains(AUTHENTICATION_FAILED) && eventFilterPolicyRegistry.ignorePredicate().test(AuditEventMetaInfo.EMPTY) == false) {
             new LogEntryBuilder().with(EVENT_TYPE_FIELD_NAME, REST_ORIGIN_FIELD_VALUE)
                 .with(EVENT_ACTION_FIELD_NAME, "authentication_failed")
                 .withRestUriAndMethod(request)
                 .withRestOrigin(threadContext)
-                .withRequestBody(request)
                 .withRequestId(requestId)
                 .withThreadContext(threadContext)
                 .build();
@@ -610,7 +618,7 @@ public class LoggingAuditTrail implements AuditTrail, ClusterStateListener {
     }
 
     @Override
-    public void authenticationFailed(String requestId, AuthenticationToken token, RestRequest request) {
+    public void authenticationFailed(String requestId, AuthenticationToken token, HttpPreRequest request) {
         if (events.contains(AUTHENTICATION_FAILED)
             && eventFilterPolicyRegistry.ignorePredicate()
                 .test(new AuditEventMetaInfo(Optional.of(token), Optional.empty(), Optional.empty(), Optional.empty())) == false) {
@@ -619,7 +627,6 @@ public class LoggingAuditTrail implements AuditTrail, ClusterStateListener {
                 .with(PRINCIPAL_FIELD_NAME, token.principal())
                 .withRestUriAndMethod(request)
                 .withRestOrigin(threadContext)
-                .withRequestBody(request)
                 .withRequestId(requestId)
                 .withThreadContext(threadContext);
             if (token instanceof ServiceAccountToken) {
@@ -658,7 +665,7 @@ public class LoggingAuditTrail implements AuditTrail, ClusterStateListener {
     }
 
     @Override
-    public void authenticationFailed(String requestId, String realm, AuthenticationToken token, RestRequest request) {
+    public void authenticationFailed(String requestId, String realm, AuthenticationToken token, HttpPreRequest request) {
         if (events.contains(REALM_AUTHENTICATION_FAILED)
             && eventFilterPolicyRegistry.ignorePredicate()
                 .test(new AuditEventMetaInfo(Optional.of(token), Optional.of(realm), Optional.empty(), Optional.empty())) == false) {
@@ -669,7 +676,6 @@ public class LoggingAuditTrail implements AuditTrail, ClusterStateListener {
                 .with(PRINCIPAL_FIELD_NAME, token.principal())
                 .withRestUriAndMethod(request)
                 .withRestOrigin(threadContext)
-                .withRequestBody(request)
                 .withRequestId(requestId)
                 .withThreadContext(threadContext)
                 .build();
@@ -685,7 +691,7 @@ public class LoggingAuditTrail implements AuditTrail, ClusterStateListener {
         AuthorizationInfo authorizationInfo
     ) {
         final User user = authentication.getEffectiveSubject().getUser();
-        final boolean isSystem = User.isInternal(user);
+        final boolean isSystem = user instanceof InternalUser;
         if ((isSystem && events.contains(SYSTEM_ACCESS_GRANTED)) || ((isSystem == false) && events.contains(ACCESS_GRANTED))) {
             final Optional<String[]> indices = Optional.ofNullable(indices(msg));
             if (eventFilterPolicyRegistry.ignorePredicate()
@@ -778,6 +784,12 @@ public class LoggingAuditTrail implements AuditTrail, ClusterStateListener {
                 } else if (msg instanceof final BulkUpdateApiKeyRequest bulkUpdateApiKeyRequest) {
                     assert BulkUpdateApiKeyAction.NAME.equals(action);
                     securityChangeLogEntryBuilder(requestId).withRequestBody(bulkUpdateApiKeyRequest).build();
+                } else if (msg instanceof final CreateCrossClusterApiKeyRequest createCrossClusterApiKeyRequest) {
+                    assert CreateCrossClusterApiKeyAction.NAME.equals(action);
+                    securityChangeLogEntryBuilder(requestId).withRequestBody(createCrossClusterApiKeyRequest).build();
+                } else if (msg instanceof final UpdateCrossClusterApiKeyRequest updateCrossClusterApiKeyRequest) {
+                    assert UpdateCrossClusterApiKeyAction.NAME.equals(action);
+                    securityChangeLogEntryBuilder(requestId).withRequestBody(updateCrossClusterApiKeyRequest).build();
                 } else {
                     throw new IllegalStateException(
                         "Unknown message class type ["
@@ -807,7 +819,7 @@ public class LoggingAuditTrail implements AuditTrail, ClusterStateListener {
         assert eventType == ACCESS_DENIED || eventType == AuditLevel.ACCESS_GRANTED || eventType == SYSTEM_ACCESS_GRANTED;
         final String[] indices = index == null ? null : new String[] { index };
         final User user = authentication.getEffectiveSubject().getUser();
-        if (User.isInternal(user) && eventType == ACCESS_GRANTED) {
+        if (user instanceof InternalUser && eventType == ACCESS_GRANTED) {
             eventType = SYSTEM_ACCESS_GRANTED;
         }
         if (events.contains(eventType)) {
@@ -881,13 +893,12 @@ public class LoggingAuditTrail implements AuditTrail, ClusterStateListener {
     }
 
     @Override
-    public void tamperedRequest(String requestId, RestRequest request) {
+    public void tamperedRequest(String requestId, HttpPreRequest request) {
         if (events.contains(TAMPERED_REQUEST) && eventFilterPolicyRegistry.ignorePredicate().test(AuditEventMetaInfo.EMPTY) == false) {
             new LogEntryBuilder().with(EVENT_TYPE_FIELD_NAME, REST_ORIGIN_FIELD_VALUE)
                 .with(EVENT_ACTION_FIELD_NAME, "tampered_request")
                 .withRestUriAndMethod(request)
                 .withRestOrigin(threadContext)
-                .withRequestBody(request)
                 .withRequestId(requestId)
                 .withThreadContext(threadContext)
                 .build();
@@ -1049,7 +1060,7 @@ public class LoggingAuditTrail implements AuditTrail, ClusterStateListener {
     }
 
     @Override
-    public void runAsDenied(String requestId, Authentication authentication, RestRequest request, AuthorizationInfo authorizationInfo) {
+    public void runAsDenied(String requestId, Authentication authentication, HttpPreRequest request, AuthorizationInfo authorizationInfo) {
         if (events.contains(RUN_AS_DENIED)
             && eventFilterPolicyRegistry.ignorePredicate()
                 .test(
@@ -1068,7 +1079,6 @@ public class LoggingAuditTrail implements AuditTrail, ClusterStateListener {
                 .withRestUriAndMethod(request)
                 .withRunAsSubject(authentication)
                 .withRestOrigin(threadContext)
-                .withRequestBody(request)
                 .withRequestId(requestId)
                 .withThreadContext(threadContext)
                 .build();
@@ -1224,11 +1234,11 @@ public class LoggingAuditTrail implements AuditTrail, ClusterStateListener {
             return this;
         }
 
-        LogEntryBuilder withRequestBody(CreateApiKeyRequest createApiKeyRequest) throws IOException {
+        LogEntryBuilder withRequestBody(AbstractCreateApiKeyRequest abstractCreateApiKeyRequest) throws IOException {
             logEntry.with(EVENT_ACTION_FIELD_NAME, "create_apikey");
             XContentBuilder builder = JsonXContent.contentBuilder().humanReadable(true);
             builder.startObject();
-            withRequestBody(builder, createApiKeyRequest);
+            withRequestBody(builder, abstractCreateApiKeyRequest);
             builder.endObject();
             logEntry.with(CREATE_CONFIG_FIELD_NAME, Strings.toString(builder));
             return this;
@@ -1246,11 +1256,11 @@ public class LoggingAuditTrail implements AuditTrail, ClusterStateListener {
             return this;
         }
 
-        LogEntryBuilder withRequestBody(final UpdateApiKeyRequest updateApiKeyRequest) throws IOException {
+        LogEntryBuilder withRequestBody(final BaseSingleUpdateApiKeyRequest baseSingleUpdateApiKeyRequest) throws IOException {
             logEntry.with(EVENT_ACTION_FIELD_NAME, "change_apikey");
             XContentBuilder builder = JsonXContent.contentBuilder().humanReadable(true);
             builder.startObject();
-            withRequestBody(builder, updateApiKeyRequest);
+            withRequestBody(builder, baseSingleUpdateApiKeyRequest);
             builder.endObject();
             logEntry.with(CHANGE_CONFIG_FIELD_NAME, Strings.toString(builder));
             return this;
@@ -1266,26 +1276,28 @@ public class LoggingAuditTrail implements AuditTrail, ClusterStateListener {
             return this;
         }
 
-        private void withRequestBody(XContentBuilder builder, CreateApiKeyRequest createApiKeyRequest) throws IOException {
-            TimeValue expiration = createApiKeyRequest.getExpiration();
+        private void withRequestBody(XContentBuilder builder, AbstractCreateApiKeyRequest abstractCreateApiKeyRequest) throws IOException {
+            TimeValue expiration = abstractCreateApiKeyRequest.getExpiration();
             builder.startObject("apikey")
-                .field("id", createApiKeyRequest.getId())
-                .field("name", createApiKeyRequest.getName())
+                .field("id", abstractCreateApiKeyRequest.getId())
+                .field("name", abstractCreateApiKeyRequest.getName())
+                .field("type", abstractCreateApiKeyRequest.getType().value())
                 .field("expiration", expiration != null ? expiration.toString() : null)
                 .startArray("role_descriptors");
-            for (RoleDescriptor roleDescriptor : createApiKeyRequest.getRoleDescriptors()) {
+            for (RoleDescriptor roleDescriptor : abstractCreateApiKeyRequest.getRoleDescriptors()) {
                 withRoleDescriptor(builder, roleDescriptor);
             }
             builder.endArray(); // role_descriptors
-            if (createApiKeyRequest.getMetadata() != null && createApiKeyRequest.getMetadata().isEmpty() == false) {
-                builder.field("metadata", createApiKeyRequest.getMetadata());
+            if (abstractCreateApiKeyRequest.getMetadata() != null && abstractCreateApiKeyRequest.getMetadata().isEmpty() == false) {
+                builder.field("metadata", abstractCreateApiKeyRequest.getMetadata());
             }
             builder.endObject(); // apikey
         }
 
-        private void withRequestBody(final XContentBuilder builder, final UpdateApiKeyRequest updateApiKeyRequest) throws IOException {
-            builder.startObject("apikey").field("id", updateApiKeyRequest.getId());
-            withBaseUpdateApiKeyFields(builder, updateApiKeyRequest);
+        private void withRequestBody(final XContentBuilder builder, final BaseSingleUpdateApiKeyRequest baseSingleUpdateApiKeyRequest)
+            throws IOException {
+            builder.startObject("apikey").field("id", baseSingleUpdateApiKeyRequest.getId());
+            withBaseUpdateApiKeyFields(builder, baseSingleUpdateApiKeyRequest);
             builder.endObject();
         }
 
@@ -1298,6 +1310,7 @@ public class LoggingAuditTrail implements AuditTrail, ClusterStateListener {
 
         private void withBaseUpdateApiKeyFields(final XContentBuilder builder, final BaseUpdateApiKeyRequest baseUpdateApiKeyRequest)
             throws IOException {
+            builder.field("type", baseUpdateApiKeyRequest.getType().value());
             if (baseUpdateApiKeyRequest.getRoleDescriptors() != null) {
                 builder.startArray("role_descriptors");
                 for (RoleDescriptor roleDescriptor : baseUpdateApiKeyRequest.getRoleDescriptors()) {
@@ -1529,7 +1542,7 @@ public class LoggingAuditTrail implements AuditTrail, ClusterStateListener {
             builder.endObject();
         }
 
-        LogEntryBuilder withRestUriAndMethod(RestRequest request) {
+        LogEntryBuilder withRestUriAndMethod(HttpPreRequest request) {
             final int queryStringIndex = request.uri().indexOf('?');
             int queryStringLength = request.uri().indexOf('#');
             if (queryStringLength < 0) {

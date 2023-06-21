@@ -58,6 +58,7 @@ import org.elasticsearch.client.RestClientBuilder;
 import org.elasticsearch.client.internal.AdminClient;
 import org.elasticsearch.client.internal.Client;
 import org.elasticsearch.client.internal.ClusterAdminClient;
+import org.elasticsearch.client.internal.IndicesAdminClient;
 import org.elasticsearch.cluster.ClusterInfoService;
 import org.elasticsearch.cluster.ClusterInfoServiceUtils;
 import org.elasticsearch.cluster.ClusterModule;
@@ -421,9 +422,7 @@ public abstract class ESIntegTestCase extends ESTestCase {
             if (randomBoolean()) {
                 randomSettingsBuilder.put(IndexModule.INDEX_QUERY_CACHE_ENABLED_SETTING.getKey(), randomBoolean());
             }
-            PutIndexTemplateRequestBuilder putTemplate = client().admin()
-                .indices()
-                .preparePutTemplate("random_index_template")
+            PutIndexTemplateRequestBuilder putTemplate = indicesAdmin().preparePutTemplate("random_index_template")
                 .setPatterns(Collections.singletonList("*"))
                 .setOrder(0)
                 .setSettings(randomSettingsBuilder);
@@ -713,11 +712,11 @@ public abstract class ESIntegTestCase extends ESTestCase {
         Settings.Builder builder = Settings.builder();
         int numberOfShards = numberOfShards();
         if (numberOfShards > 0) {
-            builder.put(SETTING_NUMBER_OF_SHARDS, numberOfShards).build();
+            builder.put(SETTING_NUMBER_OF_SHARDS, numberOfShards);
         }
         int numberOfReplicas = numberOfReplicas();
         if (numberOfReplicas >= 0) {
-            builder.put(SETTING_NUMBER_OF_REPLICAS, numberOfReplicas).build();
+            builder.put(SETTING_NUMBER_OF_REPLICAS, numberOfReplicas);
         }
         // 30% of the time
         if (randomInt(9) < 3) {
@@ -776,7 +775,7 @@ public abstract class ESIntegTestCase extends ESTestCase {
      * creates an index with the given shard and replica counts
      */
     public final void createIndex(String name, int shards, int replicas) {
-        createIndex(name, Settings.builder().put(SETTING_NUMBER_OF_SHARDS, shards).put(SETTING_NUMBER_OF_REPLICAS, replicas).build());
+        createIndex(name, indexSettings(shards, replicas).build());
     }
 
     /**
@@ -823,14 +822,14 @@ public abstract class ESIntegTestCase extends ESTestCase {
             internalCluster().ensureAtLeastNumDataNodes(numNodes);
             getExcludeSettings(numNodes, builder);
         }
-        return client().admin().indices().prepareCreate(index).setSettings(builder.build());
+        return indicesAdmin().prepareCreate(index).setSettings(builder.build());
     }
 
     /**
      * updates the settings for an index
      */
     public static void updateIndexSettings(Settings.Builder settingsBuilder, String... index) {
-        UpdateSettingsRequestBuilder settingsRequest = client().admin().indices().prepareUpdateSettings(index);
+        UpdateSettingsRequestBuilder settingsRequest = indicesAdmin().prepareUpdateSettings(index);
         settingsRequest.setSettings(settingsBuilder);
         assertAcked(settingsRequest.execute().actionGet());
     }
@@ -1049,7 +1048,7 @@ public abstract class ESIntegTestCase extends ESTestCase {
 
                     if (count == lastKnownCount) {
                         // no progress - try to refresh for the next time
-                        client().admin().indices().prepareRefresh().get();
+                        indicesAdmin().prepareRefresh().get();
                     }
                     lastKnownCount = count;
                 } catch (Exception e) { // count now acts like search and barfs if all shards failed...
@@ -1424,9 +1423,7 @@ public abstract class ESIntegTestCase extends ESTestCase {
      */
     protected final RefreshResponse refresh(String... indices) {
         waitForRelocation();
-        RefreshResponse actionGet = client().admin()
-            .indices()
-            .prepareRefresh(indices)
+        RefreshResponse actionGet = indicesAdmin().prepareRefresh(indices)
             .setIndicesOptions(IndicesOptions.STRICT_EXPAND_OPEN_HIDDEN_FORBID_CLOSED)
             .execute()
             .actionGet();
@@ -1447,7 +1444,7 @@ public abstract class ESIntegTestCase extends ESTestCase {
      */
     protected final FlushResponse flush(String... indices) {
         waitForRelocation();
-        FlushResponse actionGet = client().admin().indices().prepareFlush(indices).execute().actionGet();
+        FlushResponse actionGet = indicesAdmin().prepareFlush(indices).execute().actionGet();
         for (DefaultShardOperationFailedException failure : actionGet.getShardFailures()) {
             assertThat("unexpected flush failure " + failure.reason(), failure.status(), equalTo(RestStatus.SERVICE_UNAVAILABLE));
         }
@@ -1459,7 +1456,7 @@ public abstract class ESIntegTestCase extends ESTestCase {
      */
     protected ForceMergeResponse forceMerge() {
         waitForRelocation();
-        ForceMergeResponse actionGet = client().admin().indices().prepareForceMerge().setMaxNumSegments(1).execute().actionGet();
+        ForceMergeResponse actionGet = indicesAdmin().prepareForceMerge().setMaxNumSegments(1).execute().actionGet();
         assertNoFailures(actionGet);
         return actionGet;
     }
@@ -1517,6 +1514,13 @@ public abstract class ESIntegTestCase extends ESTestCase {
      */
     protected static ClusterAdminClient clusterAdmin() {
         return admin().cluster();
+    }
+
+    /**
+     * Returns a random indices admin client. This client can be pointing to any of the nodes in the cluster.
+     */
+    protected static IndicesAdminClient indicesAdmin() {
+        return admin().indices();
     }
 
     public void indexRandom(boolean forceRefresh, String index, int numDocs) throws InterruptedException {
@@ -1669,9 +1673,7 @@ public abstract class ESIntegTestCase extends ESTestCase {
             }
         }
         if (forceRefresh) {
-            assertNoFailures(
-                client().admin().indices().prepareRefresh(indicesArray).setIndicesOptions(IndicesOptions.lenientExpandOpen()).get()
-            );
+            assertNoFailures(indicesAdmin().prepareRefresh(indicesArray).setIndicesOptions(IndicesOptions.lenientExpandOpen()).get());
         }
     }
 
@@ -1688,7 +1690,7 @@ public abstract class ESIntegTestCase extends ESTestCase {
             // the read-only-allow-delete block isn't supported by the add block API so we must use the update settings API here.
             updateIndexSettings(Settings.builder().put(block, true), index);
         } else {
-            client().admin().indices().prepareAddBlock(IndexMetadata.APIBlock.fromSetting(block), index).get();
+            indicesAdmin().prepareAddBlock(IndexMetadata.APIBlock.fromSetting(block), index).get();
         }
     }
 
@@ -1719,21 +1721,15 @@ public abstract class ESIntegTestCase extends ESTestCase {
         throws InterruptedException {
         if (rarely()) {
             if (rarely()) {
-                client().admin()
-                    .indices()
-                    .prepareRefresh(indices)
+                indicesAdmin().prepareRefresh(indices)
                     .setIndicesOptions(IndicesOptions.lenientExpandOpen())
                     .execute(new LatchedActionListener<>(newLatch(inFlightAsyncOperations)));
             } else if (maybeFlush && rarely()) {
-                client().admin()
-                    .indices()
-                    .prepareFlush(indices)
+                indicesAdmin().prepareFlush(indices)
                     .setIndicesOptions(IndicesOptions.lenientExpandOpen())
                     .execute(new LatchedActionListener<>(newLatch(inFlightAsyncOperations)));
             } else if (rarely()) {
-                client().admin()
-                    .indices()
-                    .prepareForceMerge(indices)
+                indicesAdmin().prepareForceMerge(indices)
                     .setIndicesOptions(IndicesOptions.lenientExpandOpen())
                     .setMaxNumSegments(between(1, 10))
                     .setFlush(maybeFlush && randomBoolean())
@@ -2233,7 +2229,7 @@ public abstract class ESIntegTestCase extends ESTestCase {
      * Asserts that all segments are sorted with the provided {@link Sort}.
      */
     public void assertSortedSegments(String indexName, Sort expectedIndexSort) {
-        IndicesSegmentResponse segmentResponse = client().admin().indices().prepareSegments(indexName).execute().actionGet();
+        IndicesSegmentResponse segmentResponse = indicesAdmin().prepareSegments(indexName).execute().actionGet();
         IndexSegments indexSegments = segmentResponse.getIndices().get(indexName);
         for (IndexShardSegments indexShardSegments : indexSegments.getShards().values()) {
             for (ShardSegments shardSegments : indexShardSegments.shards()) {
@@ -2445,14 +2441,14 @@ public abstract class ESIntegTestCase extends ESTestCase {
     }
 
     public static Index resolveIndex(String index) {
-        GetIndexResponse getIndexResponse = client().admin().indices().prepareGetIndex().setIndices(index).get();
+        GetIndexResponse getIndexResponse = indicesAdmin().prepareGetIndex().setIndices(index).get();
         assertTrue("index " + index + " not found", getIndexResponse.getSettings().containsKey(index));
         String uuid = getIndexResponse.getSettings().get(index).get(IndexMetadata.SETTING_INDEX_UUID);
         return new Index(index, uuid);
     }
 
     public static String resolveCustomDataPath(String index) {
-        GetIndexResponse getIndexResponse = client().admin().indices().prepareGetIndex().setIndices(index).get();
+        GetIndexResponse getIndexResponse = indicesAdmin().prepareGetIndex().setIndices(index).get();
         assertTrue("index " + index + " not found", getIndexResponse.getSettings().containsKey(index));
         return getIndexResponse.getSettings().get(index).get(IndexMetadata.SETTING_DATA_PATH);
     }
