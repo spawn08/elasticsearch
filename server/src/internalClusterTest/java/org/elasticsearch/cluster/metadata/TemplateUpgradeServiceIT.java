@@ -18,12 +18,13 @@ import org.elasticsearch.common.settings.Setting;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.env.Environment;
 import org.elasticsearch.env.NodeEnvironment;
+import org.elasticsearch.indices.IndicesService;
 import org.elasticsearch.plugins.Plugin;
 import org.elasticsearch.repositories.RepositoriesService;
 import org.elasticsearch.script.ScriptService;
+import org.elasticsearch.telemetry.TelemetryProvider;
 import org.elasticsearch.test.ESIntegTestCase;
 import org.elasticsearch.threadpool.ThreadPool;
-import org.elasticsearch.tracing.Tracer;
 import org.elasticsearch.watcher.ResourceWatcherService;
 import org.elasticsearch.xcontent.NamedXContentRegistry;
 
@@ -76,8 +77,9 @@ public class TemplateUpgradeServiceIT extends ESIntegTestCase {
             NamedWriteableRegistry namedWriteableRegistry,
             IndexNameExpressionResolver expressionResolver,
             Supplier<RepositoriesService> repositoriesServiceSupplier,
-            Tracer tracer,
-            AllocationService allocationService
+            TelemetryProvider telemetryProvider,
+            AllocationService allocationService,
+            IndicesService indicesService
         ) {
             clusterService.getClusterSettings().addSettingsUpdateConsumer(UPDATE_TEMPLATE_DUMMY_SETTING, integer -> {
                 logger.debug("the template dummy setting was updated to {}", integer);
@@ -94,8 +96,9 @@ public class TemplateUpgradeServiceIT extends ESIntegTestCase {
                 namedWriteableRegistry,
                 expressionResolver,
                 repositoriesServiceSupplier,
-                tracer,
-                allocationService
+                telemetryProvider,
+                allocationService,
+                indicesService
             );
         }
 

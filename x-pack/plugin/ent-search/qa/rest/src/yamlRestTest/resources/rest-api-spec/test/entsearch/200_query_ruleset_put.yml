@@ -1,8 +1,8 @@
 
 setup:
   - skip:
-      version: " - 8.8.99"
-      reason: Introduced in 8.9.0
+      version: " - 8.9.99"
+      reason: Introduced in 8.10.0
 
 ---
 'Create Query Ruleset':
@@ -10,14 +10,13 @@ setup:
       query_ruleset.put:
         ruleset_id: test-ruleset
         body:
-          ruleset_id: test-ruleset
           rules:
             - rule_id: query-rule-id1
               type: pinned
               criteria:
                 - type: exact
                   metadata: query_string
-                  value: elastic
+                  values: [elastic]
               actions:
                 ids:
                   - 'id1'
@@ -27,7 +26,7 @@ setup:
               criteria:
                 - type: exact
                   metadata: query_string
-                  value: kibana
+                  values: [kibana]
               actions:
                 docs:
                   - '_index': 'test-index1'
@@ -48,7 +47,7 @@ setup:
           criteria:
             - type: exact
               metadata: query_string
-              value: elastic
+              values: [elastic]
           actions:
             ids:
               - 'id1'
@@ -58,7 +57,7 @@ setup:
           criteria:
             - type: exact
               metadata: query_string
-              value: kibana
+              values: [kibana]
           actions:
             docs:
               - '_index': 'test-index1'
@@ -72,14 +71,13 @@ setup:
       query_ruleset.put:
         ruleset_id: test-query-ruleset-recreating
         body:
-          ruleset_id: 'test-query-ruleset-recreating'
           rules:
             rule_id: 'test-rule-1'
             type: 'pinned'
             criteria:
               type: 'exact'
               metadata: 'query_string'
-              value: 'elastic'
+              values: ['elastic']
             actions:
               ids:
                 - 'id1'
@@ -90,14 +88,13 @@ setup:
       query_ruleset.put:
         ruleset_id: test-query-ruleset-recreating
         body:
-          ruleset_id: 'test-query-ruleset-recreating'
           rules:
             rule_id: 'test-rule-1'
             type: 'pinned'
             criteria:
               type: 'exact'
               metadata: 'query_string'
-              value: 'elastic'
+              values: ['elastic']
             actions:
               ids:
                 - 'id2'
@@ -115,14 +112,13 @@ setup:
       query_ruleset.put:
         ruleset_id: forbidden-query-ruleset
         body:
-          ruleset_id: 'forbidden-query-ruleset'
           rules:
             rule_id: 'test-rule-1'
             type: 'pinned'
             criteria:
               type: 'exact'
               metadata: 'query_string'
-              value: 'elastic'
+              values: ['elastic']
             actions:
               ids:
                 - 'id1'

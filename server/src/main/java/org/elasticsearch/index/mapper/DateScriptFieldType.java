@@ -75,7 +75,7 @@ public class DateScriptFieldType extends AbstractScriptFieldType<DateFieldScript
             Object::toString
         ).acceptsNull();
 
-        Builder(String name) {
+        protected Builder(String name) {
             super(name, DateFieldScript.CONTEXT);
         }
 
@@ -87,7 +87,7 @@ public class DateScriptFieldType extends AbstractScriptFieldType<DateFieldScript
             return Collections.unmodifiableList(parameters);
         }
 
-        AbstractScriptFieldType<?> createFieldType(
+        protected AbstractScriptFieldType<?> createFieldType(
             String name,
             DateFieldScript.Factory factory,
             Script script,
@@ -102,23 +102,25 @@ public class DateScriptFieldType extends AbstractScriptFieldType<DateFieldScript
         }
 
         @Override
-        AbstractScriptFieldType<?> createFieldType(
+        protected AbstractScriptFieldType<?> createFieldType(
             String name,
             DateFieldScript.Factory factory,
             Script script,
             Map<String, String> meta,
             OnScriptError onScriptError
         ) {
-            return createFieldType(name, factory, script, meta, IndexVersion.CURRENT, onScriptError);
+            return createFieldType(name, factory, script, meta, IndexVersion.current(), onScriptError);
         }
 
         @Override
-        DateFieldScript.Factory getParseFromSourceFactory() {
+        protected DateFieldScript.Factory getParseFromSourceFactory() {
             return DateFieldScript.PARSE_FROM_SOURCE;
         }
 
         @Override
-        DateFieldScript.Factory getCompositeLeafFactory(Function<SearchLookup, CompositeFieldScript.LeafFactory> parentScriptFactory) {
+        protected DateFieldScript.Factory getCompositeLeafFactory(
+            Function<SearchLookup, CompositeFieldScript.LeafFactory> parentScriptFactory
+        ) {
             return DateFieldScript.leafAdapter(parentScriptFactory);
         }
     }

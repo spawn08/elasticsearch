@@ -8,7 +8,7 @@
 package org.elasticsearch.index.engine.frozen;
 
 import org.elasticsearch.ElasticsearchException;
-import org.elasticsearch.action.index.IndexResponse;
+import org.elasticsearch.action.DocWriteResponse;
 import org.elasticsearch.action.search.ClosePointInTimeAction;
 import org.elasticsearch.action.search.ClosePointInTimeRequest;
 import org.elasticsearch.action.search.OpenPointInTimeAction;
@@ -73,8 +73,8 @@ public class FrozenIndexIT extends ESIntegTestCase {
 
         createIndex("index", 1, 1);
 
-        final IndexResponse indexResponse = client().prepareIndex("index")
-            .setSource(DataStream.TimestampField.FIXED_TIMESTAMP_FIELD, "2010-01-06T02:03:04.567Z")
+        final DocWriteResponse indexResponse = client().prepareIndex("index")
+            .setSource(DataStream.TIMESTAMP_FIELD_NAME, "2010-01-06T02:03:04.567Z")
             .get();
 
         ensureGreen("index");
@@ -84,8 +84,8 @@ public class FrozenIndexIT extends ESIntegTestCase {
 
         final String excludeSetting = INDEX_ROUTING_EXCLUDE_GROUP_SETTING.getConcreteSettingForNamespace("_name").getKey();
         updateIndexSettings(Settings.builder().put(excludeSetting, nodeNames.get(0)), "index");
-        assertAcked(client().admin().cluster().prepareReroute().add(new CancelAllocationCommand("index", 0, nodeNames.get(0), true)));
-        assertThat(client().admin().cluster().prepareHealth("index").get().getUnassignedShards(), equalTo(1));
+        assertAcked(clusterAdmin().prepareReroute().add(new CancelAllocationCommand("index", 0, nodeNames.get(0), true)));
+        assertThat(clusterAdmin().prepareHealth("index").get().getUnassignedShards(), equalTo(1));
 
         assertThat(client().prepareDelete("index", indexResponse.getId()).get().status(), equalTo(RestStatus.OK));
 
@@ -94,24 +94,20 @@ public class FrozenIndexIT extends ESIntegTestCase {
         );
 
         assertThat(
-            client().admin().cluster().prepareState().get().getState().metadata().index("index").getTimestampRange(),
+            clusterAdmin().prepareState().get().getState().metadata().index("index").getTimestampRange(),
             sameInstance(IndexLongFieldRange.EMPTY)
         );
 
         internalCluster().stopNode(nodeNames.get(1));
-        assertThat(client().admin().cluster().prepareHealth("index").get().getUnassignedShards(), equalTo(2));
+        assertThat(clusterAdmin().prepareHealth("index").get().getUnassignedShards(), equalTo(2));
         updateIndexSettings(Settings.builder().putNull(excludeSetting), "index");
-        assertThat(client().admin().cluster().prepareHealth("index").get().getUnassignedShards(), equalTo(2));
+        assertThat(clusterAdmin().prepareHealth("index").get().getUnassignedShards(), equalTo(2));
 
-        assertAcked(
-            client().admin().cluster().prepareReroute().add(new AllocateStalePrimaryAllocationCommand("index", 0, nodeNames.get(0), true))
-        );
+        assertAcked(clusterAdmin().prepareReroute().add(new AllocateStalePrimaryAllocationCommand("index", 0, nodeNames.get(0), true)));
 
         ensureYellowAndNoInitializingShards("index");
 
-        final IndexLongFieldRange timestampFieldRange = client().admin()
-            .cluster()
-            .prepareState()
+        final IndexLongFieldRange timestampFieldRange = clusterAdmin().prepareState()
             .get()
             .getState()
             .metadata()
@@ -154,7 +150,7 @@ public class FrozenIndexIT extends ESIntegTestCase {
                     jsonBuilder().startObject()
                         .startObject("_doc")
                         .startObject("properties")
-                        .startObject(DataStream.TimestampField.FIXED_TIMESTAMP_FIELD)
+                        .startObject(DataStream.TIMESTAMP_FIELD_NAME)
                         .field("type", "date")
                         .field("format", "dd LLL yyyy HH:mm:ssX")
                         .field("locale", locale)
@@ -165,9 +161,7 @@ public class FrozenIndexIT extends ESIntegTestCase {
                 )
         );
 
-        final Index index = client().admin()
-            .cluster()
-            .prepareState()
+        final Index index = clusterAdmin().prepareState()
             .clear()
             .setIndices("index")
             .setMetadata(true)
@@ -179,7 +173,7 @@ public class FrozenIndexIT extends ESIntegTestCase {
 
         ensureGreen("index");
         if (randomBoolean()) {
-            client().prepareIndex("index").setSource(DataStream.TimestampField.FIXED_TIMESTAMP_FIELD, date).get();
+            client().prepareIndex("index").setSource(DataStream.TIMESTAMP_FIELD_NAME, date).get();
         }
 
         for (final IndicesService indicesService : internalCluster().getInstances(IndicesService.class)) {

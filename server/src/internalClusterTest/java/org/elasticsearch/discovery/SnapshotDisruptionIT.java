@@ -87,8 +87,7 @@ public class SnapshotDisruptionIT extends AbstractSnapshotIntegTestCase {
                 if (snapshots != null && snapshots.isEmpty() == false) {
                     final SnapshotsInProgress.Entry snapshotEntry = snapshots.forRepo(repoName).get(0);
                     if (snapshotEntry.state() == SnapshotsInProgress.State.SUCCESS) {
-                        final RepositoriesMetadata repoMeta = event.state().metadata().custom(RepositoriesMetadata.TYPE);
-                        final RepositoryMetadata metadata = repoMeta.repository(repoName);
+                        final RepositoryMetadata metadata = RepositoriesMetadata.get(event.state()).repository(repoName);
                         if (metadata.pendingGeneration() > snapshotEntry.repositoryStateId()) {
                             logger.info("--> starting disruption");
                             networkDisruption.startDisrupting();
@@ -211,7 +210,7 @@ public class SnapshotDisruptionIT extends AbstractSnapshotIntegTestCase {
         assertThat(successfulSnapshotInfo.state(), is(SnapshotState.SUCCESS));
 
         logger.info("--> making sure snapshot delete works out cleanly");
-        assertAcked(client().admin().cluster().prepareDeleteSnapshot(repoName, "snapshot-2").get());
+        assertAcked(clusterAdmin().prepareDeleteSnapshot(repoName, "snapshot-2").get());
     }
 
     public void testMasterFailOverDuringShardSnapshots() throws Exception {

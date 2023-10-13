@@ -62,6 +62,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executor;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -212,6 +213,7 @@ public class SnapshotStressTestsIT extends AbstractSnapshotIntegTestCase {
             // a single thread for "client" activities, to limit the number of activities all starting at once
             new ScalingExecutorBuilder(CLIENT, 1, 1, TimeValue.ZERO, true, CLIENT)
         );
+        private final Executor clientExecutor = threadPool.executor(CLIENT);
 
         private final AtomicBoolean shouldStop = new AtomicBoolean();
         private final InternalTestCluster cluster;
@@ -369,9 +371,7 @@ public class SnapshotStressTestsIT extends AbstractSnapshotIntegTestCase {
                         );
                         logger.info(
                             "--> hot threads:\n{}",
-                            client().admin()
-                                .cluster()
-                                .prepareNodesHotThreads()
+                            clusterAdmin().prepareNodesHotThreads()
                                 .setThreads(99999)
                                 .setIgnoreIdleThreads(false)
                                 .get()
@@ -395,7 +395,7 @@ public class SnapshotStressTestsIT extends AbstractSnapshotIntegTestCase {
                 return;
             }
 
-            threadPool.scheduleUnlessShuttingDown(TimeValue.timeValueMillis(between(1, 500)), CLIENT, mustSucceed(action));
+            threadPool.scheduleUnlessShuttingDown(TimeValue.timeValueMillis(between(1, 500)), clientExecutor, mustSucceed(action));
         }
 
         private void startRestorer() {
@@ -1070,27 +1070,26 @@ public class SnapshotStressTestsIT extends AbstractSnapshotIntegTestCase {
             Releasable onCompletion,
             Runnable onSuccess
         ) {
-            threadPool.executor(CLIENT)
-                .execute(
-                    mustSucceed(
-                        () -> client.admin()
-                            .cluster()
-                            .prepareGetSnapshots(repositoryName)
-                            .setCurrentSnapshot()
-                            .execute(mustSucceed(getSnapshotsResponse -> {
-                                if (getSnapshotsResponse.getSnapshots()
-                                    .stream()
-                                    .noneMatch(snapshotInfo -> snapshotInfo.snapshotId().getName().equals(snapshotName))) {
+            clientExecutor.execute(
+                mustSucceed(
+                    () -> client.admin()
+                        .cluster()
+                        .prepareGetSnapshots(repositoryName)
+                        .setCurrentSnapshot()
+                        .execute(mustSucceed(getSnapshotsResponse -> {
+                            if (getSnapshotsResponse.getSnapshots()
+                                .stream()
+                                .noneMatch(snapshotInfo -> snapshotInfo.snapshotId().getName().equals(snapshotName))) {
 
-                                    logger.info("--> snapshot [{}:{}] no longer running", repositoryName, snapshotName);
-                                    Releasables.close(onCompletion);
-                                    onSuccess.run();
-                                } else {
-                                    pollForSnapshotCompletion(client, repositoryName, snapshotName, onCompletion, onSuccess);
-                                }
-                            }))
-                    )
-                );
+                                logger.info("--> snapshot [{}:{}] no longer running", repositoryName, snapshotName);
+                                Releasables.close(onCompletion);
+                                onSuccess.run();
+                            } else {
+                                pollForSnapshotCompletion(client, repositoryName, snapshotName, onCompletion, onSuccess);
+                            }
+                        }))
+                )
+            );
         }
 
         private void startNodeRestarter() {
@@ -1206,17 +1205,18 @@ public class SnapshotStressTestsIT extends AbstractSnapshotIntegTestCase {
                     assertNotNull(localReleasables.add(blockNodeRestarts()));
                     assertNotNull(localReleasables.add(tryAcquireAllPermits(permits)));
                     final Client client = localReleasables.add(acquireClient()).getClient();
-                    putRepositoryAndContinue(client, localReleasables.transfer());
+                    putRepositoryAndContinue(client, false, localReleasables.transfer());
                 }
             }
 
-            private void putRepositoryAndContinue(Client client, Releasable releasable) {
+            private void putRepositoryAndContinue(Client client, boolean nodeMightRestart, Releasable releasable) {
                 logger.info("--> put repo [{}]", repositoryName);
                 client.admin()
                     .cluster()
                     .preparePutRepository(repositoryName)
                     .setType(FsRepository.TYPE)
                     .setSettings(Settings.builder().put(FsRepository.LOCATION_SETTING.getKey(), location))
+                    .setVerify(nodeMightRestart == false)
                     .execute(mustSucceed(acknowledgedResponse -> {
                         assertTrue(acknowledgedResponse.isAcknowledged());
                         logger.info("--> finished put repo [{}]", repositoryName);
@@ -1243,6 +1243,8 @@ public class SnapshotStressTestsIT extends AbstractSnapshotIntegTestCase {
                             return;
                         }
 
+                        final var nodeMightRestart = localReleasables.add(blockNodeRestarts()) == null;
+
                         final Client client = localReleasables.add(acquireClient()).getClient();
 
                         final Releasable releaseAll = localReleasables.transfer();
@@ -1251,7 +1253,7 @@ public class SnapshotStressTestsIT extends AbstractSnapshotIntegTestCase {
                         clusterAdmin().prepareDeleteRepository(repositoryName).execute(mustSucceed(acknowledgedResponse -> {
                             assertTrue(acknowledgedResponse.isAcknowledged());
                             logger.info("--> finished delete repo [{}]", repositoryName);
-                            putRepositoryAndContinue(client, releaseAll);
+                            putRepositoryAndContinue(client, nodeMightRestart, releaseAll);
                         }));
 
                         replacingRepo = true;

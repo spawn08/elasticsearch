@@ -28,10 +28,12 @@ import org.elasticsearch.cluster.routing.RecoverySource;
 import org.elasticsearch.cluster.service.ClusterService;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.blobstore.BlobContainer;
+import org.elasticsearch.common.blobstore.OperationPurpose;
 import org.elasticsearch.common.blobstore.support.FilterBlobContainer;
 import org.elasticsearch.common.logging.Loggers;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.util.BigArrays;
+import org.elasticsearch.common.util.CancellableThreads;
 import org.elasticsearch.core.CheckedRunnable;
 import org.elasticsearch.core.Releasable;
 import org.elasticsearch.core.TimeValue;
@@ -67,7 +69,6 @@ import org.elasticsearch.snapshots.SnapshotInfo;
 import org.elasticsearch.test.ESIntegTestCase;
 import org.elasticsearch.test.InternalSettingsPlugin;
 import org.elasticsearch.test.MockLogAppender;
-import org.elasticsearch.test.junit.annotations.TestIssueLogging;
 import org.elasticsearch.test.junit.annotations.TestLogging;
 import org.elasticsearch.test.transport.MockTransportService;
 import org.elasticsearch.threadpool.ThreadPool;
@@ -182,13 +183,13 @@ public class SnapshotBasedIndexRecoveryIT extends AbstractSnapshotIntegTestCase 
                 }
 
                 @Override
-                public InputStream readBlob(String blobName) throws IOException {
+                public InputStream readBlob(OperationPurpose purpose, String blobName) throws IOException {
                     // Take into account only index files
                     if (blobName.startsWith("__") == false) {
-                        return super.readBlob(blobName);
+                        return super.readBlob(purpose, blobName);
                     }
 
-                    return new FilterInputStream(super.readBlob(blobName)) {
+                    return new FilterInputStream(super.readBlob(purpose, blobName)) {
                         @Override
                         public int read(byte[] b, int off, int len) throws IOException {
                             int read = super.read(b, off, len);
@@ -224,13 +225,13 @@ public class SnapshotBasedIndexRecoveryIT extends AbstractSnapshotIntegTestCase 
                 }
 
                 @Override
-                public InputStream readBlob(String blobName) throws IOException {
+                public InputStream readBlob(OperationPurpose purpose, String blobName) throws IOException {
                     // Fail only in index files
                     if (blobName.startsWith("__") == false) {
-                        return super.readBlob(blobName);
+                        return super.readBlob(purpose, blobName);
                     }
 
-                    return new FilterInputStream(super.readBlob(blobName)) {
+                    return new FilterInputStream(super.readBlob(purpose, blobName)) {
                         @Override
                         public int read(byte[] b, int off, int len) throws IOException {
                             if (randomBoolean()) {
@@ -287,9 +288,9 @@ public class SnapshotBasedIndexRecoveryIT extends AbstractSnapshotIntegTestCase 
                 }
 
                 @Override
-                public InputStream readBlob(String blobName) throws IOException {
+                public InputStream readBlob(OperationPurpose purpose, String blobName) throws IOException {
                     BiFunction<String, InputStream, InputStream> delegateSupplier = delegateSupplierRef.get();
-                    return delegateSupplier.apply(blobName, super.readBlob(blobName));
+                    return delegateSupplier.apply(blobName, super.readBlob(purpose, blobName));
                 }
             };
         }
@@ -447,9 +448,7 @@ public class SnapshotBasedIndexRecoveryIT extends AbstractSnapshotIntegTestCase 
 
             assertDocumentsAreEqual(indexName, numDocs);
 
-            NodesStatsResponse statsResponse = client().admin()
-                .cluster()
-                .prepareNodesStats()
+            NodesStatsResponse statsResponse = clusterAdmin().prepareNodesStats()
                 .clear()
                 .setIndices(new CommonStatsFlags(CommonStatsFlags.Flag.Recovery))
                 .get();
@@ -582,7 +581,7 @@ public class SnapshotBasedIndexRecoveryIT extends AbstractSnapshotIntegTestCase 
 
             final String targetNode;
             if (seqNoRecovery) {
-                ClusterState clusterState = client().admin().cluster().prepareState().get().getState();
+                ClusterState clusterState = clusterAdmin().prepareState().get().getState();
                 IndexShardRoutingTable shardRoutingTable = clusterState.routingTable().index(indexName).shard(0);
                 String primaryNodeName = clusterState.nodes().resolveNode(shardRoutingTable.primaryShard().currentNodeId()).getName();
                 String replicaNodeName = clusterState.nodes()
@@ -617,7 +616,7 @@ public class SnapshotBasedIndexRecoveryIT extends AbstractSnapshotIntegTestCase 
             );
 
             if (seqNoRecovery) {
-                ClusterState clusterState = client().admin().cluster().prepareState().get().getState();
+                ClusterState clusterState = clusterAdmin().prepareState().get().getState();
                 IndexShardRoutingTable shardRoutingTable = clusterState.routingTable().index(indexName).shard(0);
                 String primaryNodeName = clusterState.nodes().resolveNode(shardRoutingTable.primaryShard().currentNodeId()).getName();
 
@@ -666,10 +665,6 @@ public class SnapshotBasedIndexRecoveryIT extends AbstractSnapshotIntegTestCase 
         }
     }
 
-    @TestIssueLogging(
-        issueUrl = "https://github.com/elastic/elasticsearch/issues/96618",
-        value = "org.elasticsearch.indices.recovery:TRACE,org.elasticsearch.xpack.snapshotbasedrecoveries:TRACE"
-    )
     public void testCancelledRecoveryAbortsDownloadPromptly() throws Exception {
         updateSetting(INDICES_RECOVERY_MAX_CONCURRENT_SNAPSHOT_FILE_DOWNLOADS.getKey(), "1");
 
@@ -727,7 +722,7 @@ public class SnapshotBasedIndexRecoveryIT extends AbstractSnapshotIntegTestCase 
                                     // IllegalIndexShardStateException which it considers to be retryable, and will reset the recovery and
                                     // generate a new `CancellableThreads` which is cancelled instead of the original `CancellableThreads`,
                                     // permitting a subsequent read.
-                                    assert exception instanceof IndexShardClosedException : exception;
+                                    assert assertShardClosedException(exception);
                                     transportService.getThreadPool().generic().execute(() -> {
                                         safeAwait(readFromBlobRespondLatch);
                                         try {
@@ -737,6 +732,15 @@ public class SnapshotBasedIndexRecoveryIT extends AbstractSnapshotIntegTestCase 
                                         }
                                     });
                                 }
+                            }
+
+                            private boolean assertShardClosedException(Exception e) {
+                                if (e instanceof CancellableThreads.ExecutionCancelledException cancelledException) {
+                                    assert cancelledException.getMessage().contains("shard is closed") : e;
+                                } else {
+                                    assert e instanceof IndexShardClosedException : e;
+                                }
+                                return true;
                             }
                         }, task)
                     )
@@ -805,9 +809,7 @@ public class SnapshotBasedIndexRecoveryIT extends AbstractSnapshotIntegTestCase 
         assertAcked(indicesAdmin().prepareDelete(indexName).get());
 
         List<String> restoredIndexDataNodes = internalCluster().startDataOnlyNodes(2);
-        RestoreSnapshotResponse restoreSnapshotResponse = client().admin()
-            .cluster()
-            .prepareRestoreSnapshot(repoName, "snap")
+        RestoreSnapshotResponse restoreSnapshotResponse = clusterAdmin().prepareRestoreSnapshot(repoName, "snap")
             .setIndices(indexName)
             .setIndexSettings(
                 Settings.builder()
@@ -1026,7 +1028,7 @@ public class SnapshotBasedIndexRecoveryIT extends AbstractSnapshotIntegTestCase 
         createRepo(repoName, repoType);
         createSnapshot(repoName, "snap", Collections.singletonList(indexName));
 
-        ClusterState clusterState = client().admin().cluster().prepareState().get().getState();
+        ClusterState clusterState = clusterAdmin().prepareState().get().getState();
         String primaryNodeId = clusterState.routingTable().index(indexName).shard(0).primaryShard().currentNodeId();
         String primaryNodeName = clusterState.nodes().resolveNode(primaryNodeId).getName();
 
@@ -1036,7 +1038,7 @@ public class SnapshotBasedIndexRecoveryIT extends AbstractSnapshotIntegTestCase 
 
         ensureGreen(indexName);
 
-        ClusterState clusterStateAfterPrimaryFailOver = client().admin().cluster().prepareState().get().getState();
+        ClusterState clusterStateAfterPrimaryFailOver = clusterAdmin().prepareState().get().getState();
         IndexShardRoutingTable shardRoutingTableAfterFailOver = clusterStateAfterPrimaryFailOver.routingTable().index(indexName).shard(0);
 
         String primaryNodeIdAfterFailOver = shardRoutingTableAfterFailOver.primaryShard().currentNodeId();
@@ -1349,7 +1351,7 @@ public class SnapshotBasedIndexRecoveryIT extends AbstractSnapshotIntegTestCase 
         createRepo(repoName, TestRepositoryPlugin.FILTER_TYPE);
         createSnapshot(repoName, "snap", Collections.singletonList(indexName));
 
-        ClusterState clusterState = client().admin().cluster().prepareState().get().getState();
+        ClusterState clusterState = clusterAdmin().prepareState().get().getState();
         String primaryNodeId = clusterState.routingTable().index(indexName).shard(0).primaryShard().currentNodeId();
         String primaryNodeName = clusterState.nodes().resolveNode(primaryNodeId).getName();
         String replicaNodeId = clusterState.routingTable().index(indexName).shard(0).replicaShards().get(0).currentNodeId();
@@ -1570,7 +1572,7 @@ public class SnapshotBasedIndexRecoveryIT extends AbstractSnapshotIntegTestCase 
     }
 
     private Store.MetadataSnapshot getMetadataSnapshot(String nodeName, String indexName) throws IOException {
-        ClusterState clusterState = client().admin().cluster().prepareState().get().getState();
+        ClusterState clusterState = clusterAdmin().prepareState().get().getState();
         IndicesService indicesService = internalCluster().getInstance(IndicesService.class, nodeName);
         IndexService indexService = indicesService.indexService(clusterState.metadata().index(indexName).getIndex());
         IndexShard shard = indexService.getShard(0);
@@ -1582,7 +1584,7 @@ public class SnapshotBasedIndexRecoveryIT extends AbstractSnapshotIntegTestCase 
     }
 
     private long getSnapshotSizeForIndex(String repository, String snapshot, String index) {
-        GetSnapshotsResponse getSnapshotsResponse = client().admin().cluster().prepareGetSnapshots(repository).addSnapshots(snapshot).get();
+        GetSnapshotsResponse getSnapshotsResponse = clusterAdmin().prepareGetSnapshots(repository).addSnapshots(snapshot).get();
         for (SnapshotInfo snapshotInfo : getSnapshotsResponse.getSnapshots()) {
             SnapshotInfo.IndexSnapshotDetails indexSnapshotDetails = snapshotInfo.indexSnapshotDetails().get(index);
             assertThat(indexSnapshotDetails, is(notNullValue()));

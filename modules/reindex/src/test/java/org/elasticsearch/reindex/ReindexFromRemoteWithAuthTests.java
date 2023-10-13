@@ -36,6 +36,7 @@ import org.elasticsearch.http.HttpInfo;
 import org.elasticsearch.index.reindex.ReindexAction;
 import org.elasticsearch.index.reindex.ReindexRequestBuilder;
 import org.elasticsearch.index.reindex.RemoteInfo;
+import org.elasticsearch.indices.IndicesService;
 import org.elasticsearch.plugins.ActionPlugin;
 import org.elasticsearch.plugins.Plugin;
 import org.elasticsearch.repositories.RepositoriesService;
@@ -44,9 +45,9 @@ import org.elasticsearch.rest.RestStatus;
 import org.elasticsearch.rest.root.MainRestPlugin;
 import org.elasticsearch.script.ScriptService;
 import org.elasticsearch.tasks.Task;
+import org.elasticsearch.telemetry.TelemetryProvider;
 import org.elasticsearch.test.ESSingleNodeTestCase;
 import org.elasticsearch.threadpool.ThreadPool;
-import org.elasticsearch.tracing.Tracer;
 import org.elasticsearch.transport.netty4.Netty4Plugin;
 import org.elasticsearch.watcher.ResourceWatcherService;
 import org.elasticsearch.xcontent.NamedXContentRegistry;
@@ -99,7 +100,7 @@ public class ReindexFromRemoteWithAuthTests extends ESSingleNodeTestCase {
 
     @Before
     public void fetchTransportAddress() {
-        NodeInfo nodeInfo = client().admin().cluster().prepareNodesInfo().get().getNodes().get(0);
+        NodeInfo nodeInfo = clusterAdmin().prepareNodesInfo().get().getNodes().get(0);
         address = nodeInfo.getInfo(HttpInfo.class).getAddress().publishAddress();
     }
 
@@ -175,8 +176,9 @@ public class ReindexFromRemoteWithAuthTests extends ESSingleNodeTestCase {
             NamedWriteableRegistry namedWriteableRegistry,
             IndexNameExpressionResolver expressionResolver,
             Supplier<RepositoriesService> repositoriesServiceSupplier,
-            Tracer tracer,
-            AllocationService allocationService
+            TelemetryProvider telemetryProvider,
+            AllocationService allocationService,
+            IndicesService indicesService
         ) {
             testFilter.set(new ReindexFromRemoteWithAuthTests.TestFilter(threadPool));
             return Collections.emptyList();

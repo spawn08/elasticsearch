@@ -9,12 +9,14 @@
 package org.elasticsearch.cluster.node;
 
 import org.elasticsearch.TransportVersion;
+import org.elasticsearch.TransportVersions;
 import org.elasticsearch.Version;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.io.stream.BytesStreamOutput;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.transport.TransportAddress;
+import org.elasticsearch.index.IndexVersion;
 import org.elasticsearch.test.ESTestCase;
 
 import java.net.InetAddress;
@@ -112,11 +114,11 @@ public class DiscoveryNodeTests extends ESTestCase {
 
         {
             BytesStreamOutput streamOutput = new BytesStreamOutput();
-            streamOutput.setTransportVersion(TransportVersion.V_7_11_0);
+            streamOutput.setTransportVersion(TransportVersions.V_7_11_0);
             node.writeTo(streamOutput);
 
             StreamInput in = StreamInput.wrap(streamOutput.bytes().toBytesRef().bytes);
-            in.setTransportVersion(TransportVersion.V_7_11_0);
+            in.setTransportVersion(TransportVersions.V_7_11_0);
             DiscoveryNode serialized = new DiscoveryNode(in);
             final Set<DiscoveryNodeRole> roles = serialized.getRoles();
             assertThat(roles, hasSize(1));
@@ -142,7 +144,10 @@ public class DiscoveryNodeTests extends ESTestCase {
     }
 
     private void runTestDiscoveryNodeIsRemoteClusterClient(final Settings settings, final boolean expected) {
-        final DiscoveryNode node = DiscoveryNode.createLocal(settings, new TransportAddress(TransportAddress.META_ADDRESS, 9200), "node");
+        final DiscoveryNode node = DiscoveryNodeUtils.builder("node")
+            .applySettings(settings)
+            .address(new TransportAddress(TransportAddress.META_ADDRESS, 9200))
+            .build();
         assertThat(node.isRemoteClusterClient(), equalTo(expected));
         if (expected) {
             assertThat(node.getRoles(), hasItem(DiscoveryNodeRole.REMOTE_CLUSTER_CLIENT_ROLE));
@@ -178,39 +183,53 @@ public class DiscoveryNodeTests extends ESTestCase {
             transportAddress,
             Map.of("test-attr", "val"),
             DiscoveryNodeRole.roles(),
-            Version.CURRENT,
+            null,
             withExternalId ? "test-external-id" : null
         );
 
-        assertThat(Strings.toString(node, true, false), equalTo(Strings.format("""
-            {
-              "test-id" : {
-                "name" : "test-name",
-                "ephemeral_id" : "test-ephemeral-id",
-                "transport_address" : "%s",
-                "external_id" : "%s",
-                "attributes" : {
-                  "test-attr" : "val"
-                },
-                "roles" : [
-                  "data",
-                  "data_cold",
-                  "data_content",
-                  "data_frozen",
-                  "data_hot",
-                  "data_warm",
-                  "index",
-                  "ingest",
-                  "master",
-                  "ml",
-                  "remote_cluster_client",
-                  "search",
-                  "transform",
-                  "voting_only"
-                ],
-                "version" : "%s"
-              }
-            }""", transportAddress, withExternalId ? "test-external-id" : "test-name", Version.CURRENT)));
+        assertThat(
+            Strings.toString(node, true, false),
+            equalTo(
+                Strings.format(
+                    """
+                        {
+                          "test-id" : {
+                            "name" : "test-name",
+                            "ephemeral_id" : "test-ephemeral-id",
+                            "transport_address" : "%s",
+                            "external_id" : "%s",
+                            "attributes" : {
+                              "test-attr" : "val"
+                            },
+                            "roles" : [
+                              "data",
+                              "data_cold",
+                              "data_content",
+                              "data_frozen",
+                              "data_hot",
+                              "data_warm",
+                              "index",
+                              "ingest",
+                              "master",
+                              "ml",
+                              "remote_cluster_client",
+                              "search",
+                              "transform",
+                              "voting_only"
+                            ],
+                            "version" : "%s",
+                            "min_index_version" : %s,
+                            "max_index_version" : %s
+                          }
+                        }""",
+                    transportAddress,
+                    withExternalId ? "test-external-id" : "test-name",
+                    Version.CURRENT,
+                    IndexVersion.MINIMUM_COMPATIBLE,
+                    IndexVersion.current()
+                )
+            )
+        );
     }
 
     public void testDiscoveryNodeToString() {

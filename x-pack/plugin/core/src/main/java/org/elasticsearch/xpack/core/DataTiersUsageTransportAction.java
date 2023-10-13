@@ -13,6 +13,7 @@ import org.elasticsearch.action.admin.indices.stats.CommonStatsFlags;
 import org.elasticsearch.action.admin.indices.stats.IndexShardStats;
 import org.elasticsearch.action.support.ActionFilters;
 import org.elasticsearch.client.internal.Client;
+import org.elasticsearch.client.internal.ParentTaskAssigningClient;
 import org.elasticsearch.cluster.ClusterState;
 import org.elasticsearch.cluster.metadata.IndexMetadata;
 import org.elasticsearch.cluster.metadata.IndexNameExpressionResolver;
@@ -74,12 +75,12 @@ public class DataTiersUsageTransportAction extends XPackUsageFeatureTransportAct
         ClusterState state,
         ActionListener<XPackUsageFeatureResponse> listener
     ) {
-        client.admin()
+        new ParentTaskAssigningClient(client, clusterService.localNode(), task).admin()
             .cluster()
             .prepareNodesStats()
             .all()
             .setIndices(CommonStatsFlags.ALL)
-            .execute(ActionListener.wrap(nodesStatsResponse -> {
+            .execute(listener.delegateFailureAndWrap((delegate, nodesStatsResponse) -> {
                 final RoutingNodes routingNodes = state.getRoutingNodes();
                 final Map<String, IndexMetadata> indices = state.getMetadata().getIndices();
 
@@ -93,8 +94,8 @@ public class DataTiersUsageTransportAction extends XPackUsageFeatureTransportAct
                     routingNodes
                 );
 
-                listener.onResponse(new XPackUsageFeatureResponse(new DataTiersFeatureSetUsage(tierSpecificStats)));
-            }, listener::onFailure));
+                delegate.onResponse(new XPackUsageFeatureResponse(new DataTiersFeatureSetUsage(tierSpecificStats)));
+            }));
     }
 
     // Visible for testing

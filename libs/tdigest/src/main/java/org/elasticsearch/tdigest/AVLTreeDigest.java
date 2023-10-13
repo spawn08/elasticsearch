@@ -24,7 +24,6 @@ package org.elasticsearch.tdigest;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Iterator;
-import java.util.List;
 import java.util.Random;
 
 import static org.elasticsearch.tdigest.IntAVLTree.NIL;
@@ -69,17 +68,7 @@ public class AVLTreeDigest extends AbstractTDigest {
     }
 
     @Override
-    public void add(List<? extends TDigest> others) {
-        for (TDigest other : others) {
-            setMinMax(Math.min(min, other.getMin()), Math.max(max, other.getMax()));
-            for (Centroid centroid : other.centroids()) {
-                add(centroid.mean(), centroid.count());
-            }
-        }
-    }
-
-    @Override
-    public void add(double x, int w) {
+    public void add(double x, long w) {
         checkValue(x);
         needsCompression = true;
 
@@ -95,7 +84,7 @@ public class AVLTreeDigest extends AbstractTDigest {
         }
 
         if (start == NIL) { // empty summary
-            assert summary.size() == 0;
+            assert summary.isEmpty();
             summary.add(x, w);
             count = w;
         } else {
@@ -138,7 +127,7 @@ public class AVLTreeDigest extends AbstractTDigest {
                 // if the nearest point was not unique, then we may not be modifying the first copy
                 // which means that ordering can change
                 double centroid = summary.mean(closest);
-                int count = summary.count(closest);
+                long count = summary.count(closest);
                 centroid = weightedAverage(centroid, count, x, w);
                 count += w;
                 summary.update(closest, centroid, count);
@@ -200,7 +189,7 @@ public class AVLTreeDigest extends AbstractTDigest {
     @Override
     public double cdf(double x) {
         AVLGroupTree values = summary;
-        if (values.size() == 0) {
+        if (values.isEmpty()) {
             return Double.NaN;
         }
         if (values.size() == 1) {
@@ -283,7 +272,7 @@ public class AVLTreeDigest extends AbstractTDigest {
         }
 
         AVLGroupTree values = summary;
-        if (values.size() == 0) {
+        if (values.isEmpty()) {
             // no centroids means no data, no way to get a quantile
             return Double.NaN;
         } else if (values.size() == 1) {
@@ -304,7 +293,7 @@ public class AVLTreeDigest extends AbstractTDigest {
         }
 
         int currentNode = values.first();
-        int currentWeight = values.count(currentNode);
+        long currentWeight = values.count(currentNode);
 
         // Total mass to the left of the center of the current node.
         double weightSoFar = currentWeight / 2.0;
@@ -316,7 +305,7 @@ public class AVLTreeDigest extends AbstractTDigest {
 
         for (int i = 0; i < values.size() - 1; i++) {
             int nextNode = values.next(currentNode);
-            int nextWeight = values.count(nextNode);
+            long nextWeight = values.count(nextNode);
             // this is the mass between current center and next center
             double dw = (currentWeight + nextWeight) / 2.0;
 

@@ -8,7 +8,7 @@ package org.elasticsearch.xpack.security.transport;
 
 import org.elasticsearch.ElasticsearchSecurityException;
 import org.elasticsearch.TransportVersion;
-import org.elasticsearch.Version;
+import org.elasticsearch.TransportVersions;
 import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.action.admin.cluster.state.ClusterStateAction;
 import org.elasticsearch.action.admin.cluster.state.ClusterStateRequest;
@@ -34,7 +34,6 @@ import org.elasticsearch.threadpool.TestThreadPool;
 import org.elasticsearch.threadpool.ThreadPool;
 import org.elasticsearch.transport.RemoteClusterPortSettings;
 import org.elasticsearch.transport.SendRequestTransportException;
-import org.elasticsearch.transport.TcpTransport;
 import org.elasticsearch.transport.Transport;
 import org.elasticsearch.transport.Transport.Connection;
 import org.elasticsearch.transport.TransportChannel;
@@ -53,7 +52,6 @@ import org.elasticsearch.xpack.core.security.authc.AuthenticationTestHelper;
 import org.elasticsearch.xpack.core.security.authc.CrossClusterAccessSubjectInfo;
 import org.elasticsearch.xpack.core.security.authz.AuthorizationServiceField;
 import org.elasticsearch.xpack.core.security.authz.RoleDescriptorsIntersection;
-import org.elasticsearch.xpack.core.security.authz.store.ReservedRolesStore;
 import org.elasticsearch.xpack.core.security.user.InternalUser;
 import org.elasticsearch.xpack.core.security.user.InternalUsers;
 import org.elasticsearch.xpack.core.security.user.SystemUser;
@@ -75,11 +73,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
-import static org.elasticsearch.cluster.metadata.DataLifecycle.DLM_ORIGIN;
+import static org.elasticsearch.cluster.metadata.DataStreamLifecycle.DATA_STREAM_LIFECYCLE_ORIGIN;
 import static org.elasticsearch.test.ActionListenerUtils.anyActionListener;
 import static org.elasticsearch.xpack.core.ClientHelper.ASYNC_SEARCH_ORIGIN;
 import static org.elasticsearch.xpack.core.ClientHelper.SECURITY_ORIGIN;
@@ -408,7 +407,7 @@ public class SecurityServerTransportInterceptorTests extends ESTestCase {
             }
         };
         AsyncSender sender = interceptor.interceptSender(intercepted);
-        final TransportVersion connectionVersion = TransportVersion.fromId(Version.CURRENT.id - randomIntBetween(100, 100000));
+        final TransportVersion connectionVersion = TransportVersion.fromId(TransportVersion.current().id() - randomIntBetween(100, 100000));
         assertEquals(connectionVersion, TransportVersion.min(connectionVersion, TransportVersion.current()));
 
         Transport.Connection connection = mock(Transport.Connection.class);
@@ -431,8 +430,8 @@ public class SecurityServerTransportInterceptorTests extends ESTestCase {
             InternalUsers.XPACK_USER,
             ASYNC_SEARCH_ORIGIN,
             InternalUsers.ASYNC_SEARCH_USER,
-            DLM_ORIGIN,
-            InternalUsers.DLM_USER
+            DATA_STREAM_LIFECYCLE_ORIGIN,
+            InternalUsers.DATA_STREAM_LIFECYCLE_USER
         );
 
         final String origin = randomFrom(originToUserMap.keySet());
@@ -497,7 +496,12 @@ public class SecurityServerTransportInterceptorTests extends ESTestCase {
                 threadContext.wrapRestorable(storedContext),
                 new TransportResponseHandler.Empty() {
                     @Override
-                    public void handleResponse(TransportResponse.Empty response) {
+                    public Executor executor(ThreadPool threadPool) {
+                        return TransportResponseHandler.TRANSPORT_WORKER;
+                    }
+
+                    @Override
+                    public void handleResponse() {
                         assertEquals("bar", threadContext.getTransient("foo"));
                         assertEquals("value", threadContext.getHeader("key"));
                     }
@@ -527,7 +531,12 @@ public class SecurityServerTransportInterceptorTests extends ESTestCase {
                 threadContext.newRestorableContext(true),
                 new TransportResponseHandler.Empty() {
                     @Override
-                    public void handleResponse(TransportResponse.Empty response) {
+                    public Executor executor(ThreadPool threadPool) {
+                        return TransportResponseHandler.TRANSPORT_WORKER;
+                    }
+
+                    @Override
+                    public void handleResponse() {
                         assertEquals("different_bar", threadContext.getTransient("foo"));
                         assertEquals("value2", threadContext.getHeader("key"));
                     }
@@ -561,7 +570,7 @@ public class SecurityServerTransportInterceptorTests extends ESTestCase {
                 logger,
                 DeleteIndexAction.NAME,
                 randomBoolean(),
-                randomBoolean() ? ThreadPool.Names.SAME : ThreadPool.Names.GENERIC,
+                threadPool.executor(randomBoolean() ? ThreadPool.Names.SAME : ThreadPool.Names.GENERIC),
                 (request, channel, task) -> fail("should fail at destructive operations check to trigger listener failure"),
                 Map.of(
                     profileName,
@@ -590,8 +599,6 @@ public class SecurityServerTransportInterceptorTests extends ESTestCase {
     }
 
     public void testSendWithCrossClusterAccessHeadersWithUnsupportedLicense() throws Exception {
-        assumeTrue("untrusted remote cluster feature flag must be enabled", TcpTransport.isUntrustedRemoteClusterEnabled());
-
         final MockLicenseState unsupportedLicenseState = MockLicenseState.createMock();
         Mockito.when(unsupportedLicenseState.isAllowed(Security.ADVANCED_REMOTE_CLUSTER_SECURITY_FEATURE)).thenReturn(false);
 
@@ -624,6 +631,11 @@ public class SecurityServerTransportInterceptorTests extends ESTestCase {
         final AtomicBoolean calledHandleException = new AtomicBoolean(false);
         final AtomicReference<TransportException> actualException = new AtomicReference<>();
         sender.sendRequest(connection, "action", mock(TransportRequest.class), null, new TransportResponseHandler<>() {
+            @Override
+            public Executor executor(ThreadPool threadPool) {
+                return TransportResponseHandler.TRANSPORT_WORKER;
+            }
+
             @Override
             public void handleResponse(TransportResponse response) {
                 fail("should not receive a response");
@@ -664,7 +676,6 @@ public class SecurityServerTransportInterceptorTests extends ESTestCase {
     }
 
     public void testSendWithCrossClusterAccessHeadersForSystemUserRegularAction() throws Exception {
-        assumeTrue("untrusted remote cluster feature flag must be enabled", TcpTransport.isUntrustedRemoteClusterEnabled());
         final String action;
         final TransportRequest request;
         if (randomBoolean()) {
@@ -683,7 +694,6 @@ public class SecurityServerTransportInterceptorTests extends ESTestCase {
     }
 
     public void testSendWithCrossClusterAccessHeadersForSystemUserCcrInternalAction() throws Exception {
-        assumeTrue("untrusted remote cluster feature flag must be enabled", TcpTransport.isUntrustedRemoteClusterEnabled());
         final String action = randomFrom(
             "internal:admin/ccr/restore/session/put",
             "internal:admin/ccr/restore/session/clear",
@@ -699,7 +709,6 @@ public class SecurityServerTransportInterceptorTests extends ESTestCase {
     }
 
     public void testSendWithCrossClusterAccessHeadersForRegularUserRegularAction() throws Exception {
-        assumeTrue("untrusted remote cluster feature flag must be enabled", TcpTransport.isUntrustedRemoteClusterEnabled());
         final Authentication authentication = randomValueOtherThanMany(
             authc -> authc.getAuthenticationType() == Authentication.AuthenticationType.INTERNAL,
             () -> AuthenticationTestHelper.builder().build()
@@ -710,7 +719,6 @@ public class SecurityServerTransportInterceptorTests extends ESTestCase {
     }
 
     public void testSendWithCrossClusterAccessHeadersForRegularUserClusterStateAction() throws Exception {
-        assumeTrue("untrusted remote cluster feature flag must be enabled", TcpTransport.isUntrustedRemoteClusterEnabled());
         final Authentication authentication = randomValueOtherThanMany(
             authc -> authc.getAuthenticationType() == Authentication.AuthenticationType.INTERNAL,
             () -> AuthenticationTestHelper.builder().build()
@@ -792,6 +800,11 @@ public class SecurityServerTransportInterceptorTests extends ESTestCase {
 
         sender.sendRequest(connection, action, request, null, new TransportResponseHandler<>() {
             @Override
+            public Executor executor(ThreadPool threadPool) {
+                return TransportResponseHandler.TRANSPORT_WORKER;
+            }
+
+            @Override
             public void handleResponse(TransportResponse response) {
                 // Headers should get restored before handle response is called
                 assertThat(securityContext.getAuthentication(), equalTo(authentication));
@@ -855,8 +868,6 @@ public class SecurityServerTransportInterceptorTests extends ESTestCase {
     }
 
     public void testSendWithUserIfCrossClusterAccessHeadersConditionNotMet() throws Exception {
-        assumeTrue("untrusted remote cluster feature flag must be enabled", TcpTransport.isUntrustedRemoteClusterEnabled());
-
         boolean noCredential = randomBoolean();
         final boolean notRemoteConnection = randomBoolean();
         // Ensure at least one condition fails
@@ -928,20 +939,8 @@ public class SecurityServerTransportInterceptorTests extends ESTestCase {
     }
 
     public void testSendWithCrossClusterAccessHeadersThrowsOnOldConnection() throws Exception {
-        assumeTrue("untrusted remote cluster feature flag must be enabled", TcpTransport.isUntrustedRemoteClusterEnabled());
-
         final Authentication authentication = AuthenticationTestHelper.builder()
-            .user(
-                new User(
-                    randomAlphaOfLengthBetween(3, 10),
-                    randomArray(
-                        0,
-                        4,
-                        String[]::new,
-                        () -> randomValueOtherThanMany(ReservedRolesStore::isReserved, () -> randomAlphaOfLengthBetween(1, 20))
-                    )
-                )
-            )
+            .user(new User(randomAlphaOfLengthBetween(3, 10), randomArray(0, 4, String[]::new, () -> randomAlphaOfLengthBetween(1, 20))))
             .realm()
             .build();
         authentication.writeToContext(threadContext);
@@ -983,17 +982,22 @@ public class SecurityServerTransportInterceptorTests extends ESTestCase {
         });
         final Transport.Connection connection = mock(Transport.Connection.class);
         final TransportVersion versionBeforeCrossClusterAccessRealm = TransportVersionUtils.getPreviousVersion(
-            RemoteClusterPortSettings.TRANSPORT_VERSION_ADVANCED_REMOTE_CLUSTER_SECURITY_CCR
+            RemoteClusterPortSettings.TRANSPORT_VERSION_ADVANCED_REMOTE_CLUSTER_SECURITY
         );
         final TransportVersion version = TransportVersionUtils.randomVersionBetween(
             random(),
-            TransportVersion.V_7_17_0,
+            TransportVersions.V_7_17_0,
             versionBeforeCrossClusterAccessRealm
         );
         when(connection.getTransportVersion()).thenReturn(version);
         final AtomicBoolean calledHandleException = new AtomicBoolean(false);
         final AtomicReference<TransportException> actualException = new AtomicReference<>();
         sender.sendRequest(connection, "action", mock(TransportRequest.class), null, new TransportResponseHandler<>() {
+            @Override
+            public Executor executor(ThreadPool threadPool) {
+                return TransportResponseHandler.TRANSPORT_WORKER;
+            }
+
             @Override
             public void handleResponse(TransportResponse response) {
                 fail("should not receive a response");
@@ -1031,8 +1035,6 @@ public class SecurityServerTransportInterceptorTests extends ESTestCase {
     }
 
     public void testSendRemoteRequestFailsIfUserHasNoRemoteIndicesPrivileges() throws Exception {
-        assumeTrue("untrusted remote cluster feature flag must be enabled", TcpTransport.isUntrustedRemoteClusterEnabled());
-
         final Authentication authentication = AuthenticationTestHelper.builder()
             .user(new User(randomAlphaOfLengthBetween(3, 10), randomRoles()))
             .realm()
@@ -1090,6 +1092,11 @@ public class SecurityServerTransportInterceptorTests extends ESTestCase {
 
         final var actualException = new AtomicReference<Throwable>();
         sender.sendRequest(connection, "action", mock(TransportRequest.class), null, new TransportResponseHandler<>() {
+            @Override
+            public Executor executor(ThreadPool threadPool) {
+                return TransportResponseHandler.TRANSPORT_WORKER;
+            }
+
             @Override
             public void handleResponse(TransportResponse response) {
                 fail("should not success");

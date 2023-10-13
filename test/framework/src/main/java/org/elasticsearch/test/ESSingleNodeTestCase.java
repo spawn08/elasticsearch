@@ -20,6 +20,7 @@ import org.elasticsearch.action.support.DestructiveOperations;
 import org.elasticsearch.action.support.IndicesOptions;
 import org.elasticsearch.client.internal.AdminClient;
 import org.elasticsearch.client.internal.Client;
+import org.elasticsearch.client.internal.ClusterAdminClient;
 import org.elasticsearch.client.internal.IndicesAdminClient;
 import org.elasticsearch.cluster.ClusterName;
 import org.elasticsearch.cluster.health.ClusterHealthStatus;
@@ -44,6 +45,7 @@ import org.elasticsearch.node.Node;
 import org.elasticsearch.node.NodeValidationException;
 import org.elasticsearch.plugins.Plugin;
 import org.elasticsearch.script.MockScriptService;
+import org.elasticsearch.search.ConcurrentSearchTestPlugin;
 import org.elasticsearch.search.SearchService;
 import org.elasticsearch.search.internal.SearchContext;
 import org.elasticsearch.test.rest.ESRestTestCase;
@@ -85,7 +87,7 @@ public abstract class ESSingleNodeTestCase extends ESTestCase {
         // we must wait for the node to actually be up and running. otherwise the node might have started,
         // elected itself master but might not yet have removed the
         // SERVICE_UNAVAILABLE/1/state not recovered / initialized block
-        ClusterHealthResponse clusterHealthResponse = client().admin().cluster().prepareHealth().setWaitForGreenStatus().get();
+        ClusterHealthResponse clusterHealthResponse = clusterAdmin().prepareHealth().setWaitForGreenStatus().get();
         assertFalse(clusterHealthResponse.isTimedOut());
         indicesAdmin().preparePutTemplate("one_shard_index_template")
             .setPatterns(Collections.singletonList("*"))
@@ -144,7 +146,7 @@ public abstract class ESSingleNodeTestCase extends ESTestCase {
         var deleteComponentTemplateRequest = new DeleteComponentTemplateAction.Request("*");
         assertAcked(client().execute(DeleteComponentTemplateAction.INSTANCE, deleteComponentTemplateRequest).actionGet());
         assertAcked(indicesAdmin().prepareDelete("*").setIndicesOptions(IndicesOptions.LENIENT_EXPAND_OPEN_CLOSED_HIDDEN).get());
-        Metadata metadata = client().admin().cluster().prepareState().get().getState().getMetadata();
+        Metadata metadata = clusterAdmin().prepareState().get().getState().getMetadata();
         assertThat(
             "test leaves persistent cluster metadata behind: " + metadata.persistentSettings().keySet(),
             metadata.persistentSettings().size(),
@@ -218,15 +220,14 @@ public abstract class ESSingleNodeTestCase extends ESTestCase {
     protected List<String> filteredWarnings() {
         return Stream.concat(
             super.filteredWarnings().stream(),
-            List.of("[index.data_path] setting was deprecated in Elasticsearch and will be removed in a future release.").stream()
+            Stream.of("[index.data_path] setting was deprecated in Elasticsearch and will be removed in a future release.")
         ).collect(Collectors.toList());
     }
 
     private Node newNode() {
         final Path tempDir = createTempDir();
         final String nodeName = nodeSettings().get(Node.NODE_NAME_SETTING.getKey(), "node_s_0");
-
-        Settings settings = Settings.builder()
+        Settings.Builder settingBuilder = Settings.builder()
             .put(ClusterName.CLUSTER_NAME_SETTING.getKey(), InternalTestCluster.clusterName("single-node-cluster", random().nextLong()))
             .put(DestructiveOperations.REQUIRES_NAME_SETTING.getKey(), false)
             .put(Environment.PATH_HOME_SETTING.getKey(), tempDir)
@@ -249,8 +250,14 @@ public abstract class ESSingleNodeTestCase extends ESTestCase {
             .put(HierarchyCircuitBreakerService.USE_REAL_MEMORY_USAGE_SETTING.getKey(), false)
             .putList(DISCOVERY_SEED_HOSTS_SETTING.getKey()) // empty list disables a port scan for other nodes
             .putList(INITIAL_MASTER_NODES_SETTING.getKey(), nodeName)
-            .put(nodeSettings()) // allow test cases to provide their own settings or override these
-            .build();
+            .put(nodeSettings());// allow test cases to provide their own settings or override these
+
+        boolean enableConcurrentSearch = enableConcurrentSearch();
+        if (enableConcurrentSearch) {
+            settingBuilder.put(SearchService.QUERY_PHASE_PARALLEL_COLLECTION_ENABLED.getKey(), true)
+                .put(SearchService.MINIMUM_DOCS_PER_SLICE.getKey(), 1);
+        }
+        Settings settings = settingBuilder.build();
 
         Collection<Class<? extends Plugin>> plugins = new ArrayList<>(getPlugins());
         if (plugins.contains(getTestTransportPlugin()) == false) {
@@ -258,6 +265,9 @@ public abstract class ESSingleNodeTestCase extends ESTestCase {
         }
         if (addMockHttpTransport()) {
             plugins.add(MockHttpTransport.TestPlugin.class);
+        }
+        if (enableConcurrentSearch) {
+            plugins.add(ConcurrentSearchTestPlugin.class);
         }
         plugins.add(MockScriptService.TestPlugin.class);
         Node node = new MockNode(settings, plugins, forbidPrivateIndexSettings());
@@ -288,6 +298,13 @@ public abstract class ESSingleNodeTestCase extends ESTestCase {
      */
     protected IndicesAdminClient indicesAdmin() {
         return admin().indices();
+    }
+
+    /**
+     * Returns a cluster admin client.
+     */
+    protected ClusterAdminClient clusterAdmin() {
+        return admin().cluster();
     }
 
     public Client wrapClient(final Client client) {
@@ -348,10 +365,9 @@ public abstract class ESSingleNodeTestCase extends ESTestCase {
         assertAcked(createIndexRequestBuilder.get());
         // Wait for the index to be allocated so that cluster state updates don't override
         // changes that would have been done locally
-        ClusterHealthResponse health = client().admin()
-            .cluster()
-            .health(new ClusterHealthRequest(index).waitForYellowStatus().waitForEvents(Priority.LANGUID).waitForNoRelocatingShards(true))
-            .actionGet();
+        ClusterHealthResponse health = clusterAdmin().health(
+            new ClusterHealthRequest(index).waitForYellowStatus().waitForEvents(Priority.LANGUID).waitForNoRelocatingShards(true)
+        ).actionGet();
         assertThat(health.getStatus(), lessThanOrEqualTo(ClusterHealthStatus.YELLOW));
         assertThat("Cluster must be a single node cluster", health.getNumberOfDataNodes(), equalTo(1));
         IndicesService instanceFromNode = getInstanceFromNode(IndicesService.class);
@@ -389,20 +405,17 @@ public abstract class ESSingleNodeTestCase extends ESTestCase {
      * @param timeout time out value to set on {@link org.elasticsearch.action.admin.cluster.health.ClusterHealthRequest}
      */
     public ClusterHealthStatus ensureGreen(TimeValue timeout, String... indices) {
-        ClusterHealthResponse actionGet = client().admin()
-            .cluster()
-            .health(
-                new ClusterHealthRequest(indices).timeout(timeout)
-                    .waitForGreenStatus()
-                    .waitForEvents(Priority.LANGUID)
-                    .waitForNoRelocatingShards(true)
-            )
-            .actionGet();
+        ClusterHealthResponse actionGet = clusterAdmin().health(
+            new ClusterHealthRequest(indices).timeout(timeout)
+                .waitForGreenStatus()
+                .waitForEvents(Priority.LANGUID)
+                .waitForNoRelocatingShards(true)
+        ).actionGet();
         if (actionGet.isTimedOut()) {
             logger.info(
                 "ensureGreen timed out, cluster state:\n{}\n{}",
-                client().admin().cluster().prepareState().get().getState(),
-                client().admin().cluster().preparePendingClusterTasks().get()
+                clusterAdmin().prepareState().get().getState(),
+                clusterAdmin().preparePendingClusterTasks().get()
             );
             assertThat("timed out waiting for green state", actionGet.isTimedOut(), equalTo(false));
         }
@@ -426,12 +439,18 @@ public abstract class ESSingleNodeTestCase extends ESTestCase {
      * inspired by {@link ESRestTestCase}
      */
     protected void ensureNoInitializingShards() {
-        ClusterHealthResponse actionGet = client().admin()
-            .cluster()
-            .health(new ClusterHealthRequest("_all").waitForNoInitializingShards(true))
+        ClusterHealthResponse actionGet = clusterAdmin().health(new ClusterHealthRequest("_all").waitForNoInitializingShards(true))
             .actionGet();
 
         assertFalse("timed out waiting for shards to initialize", actionGet.isTimedOut());
     }
 
+    /**
+     * Whether we'd like to enable inter-segment search concurrency and increase the likelihood of leveraging it, by creating multiple
+     * slices with a low amount of documents in them, which would not be allowed in production.
+     * Default is true, can be disabled if it causes problems in specific tests.
+     */
+    protected boolean enableConcurrentSearch() {
+        return true;
+    }
 }

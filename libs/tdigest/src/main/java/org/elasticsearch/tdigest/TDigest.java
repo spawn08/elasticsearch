@@ -22,7 +22,6 @@
 package org.elasticsearch.tdigest;
 
 import java.util.Collection;
-import java.util.List;
 import java.util.Locale;
 
 /**
@@ -95,7 +94,7 @@ public abstract class TDigest {
      * @param x The value to add.
      * @param w The weight of this point.
      */
-    public abstract void add(double x, int w);
+    public abstract void add(double x, long w);
 
     /**
      * Add a single sample to this TDigest.
@@ -106,13 +105,11 @@ public abstract class TDigest {
         add(x, 1);
     }
 
-    final void checkValue(double x) {
+    static void checkValue(double x) {
         if (Double.isNaN(x) || Double.isInfinite(x)) {
             throw new IllegalArgumentException("Invalid value: " + x);
         }
     }
-
-    public abstract void add(List<? extends TDigest> others);
 
     /**
      * Re-examines a t-digest to determine whether some centroids are redundant.  If your data are
@@ -201,13 +198,5 @@ public abstract class TDigest {
 
     public double getMax() {
         return max;
-    }
-
-    /**
-     * Override the min and max values for testing purposes
-     */
-    void setMinMax(double min, double max) {
-        this.min = min;
-        this.max = max;
     }
 }

@@ -8,10 +8,6 @@
 
 package org.elasticsearch.search.aggregations.metrics;
 
-import org.elasticsearch.tdigest.TDigest;
-
-import java.util.List;
-
 public final class EmptyTDigestState extends TDigestState {
     public EmptyTDigestState() {
         // Use the sorting implementation to minimize memory allocation.
@@ -19,22 +15,12 @@ public final class EmptyTDigestState extends TDigestState {
     }
 
     @Override
-    public void add(double x, int w) {
+    public void add(double x, long w) {
         throw new UnsupportedOperationException("Immutable Empty TDigest");
     }
 
     @Override
     public void add(double x) {
-        throw new UnsupportedOperationException("Immutable Empty TDigest");
-    }
-
-    @Override
-    public void add(List<? extends TDigestState> others) {
-        throw new UnsupportedOperationException("Immutable Empty TDigest");
-    }
-
-    @Override
-    public void add(TDigest other) {
         throw new UnsupportedOperationException("Immutable Empty TDigest");
     }
 

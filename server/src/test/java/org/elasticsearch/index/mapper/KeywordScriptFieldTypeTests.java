@@ -37,6 +37,7 @@ import org.elasticsearch.index.query.SearchExecutionContext;
 import org.elasticsearch.script.DocReader;
 import org.elasticsearch.script.ScoreScript;
 import org.elasticsearch.script.Script;
+import org.elasticsearch.script.ScriptFactory;
 import org.elasticsearch.script.ScriptType;
 import org.elasticsearch.script.StringFieldScript;
 import org.elasticsearch.search.MultiValueMode;
@@ -50,6 +51,16 @@ import static java.util.Collections.emptyMap;
 import static org.hamcrest.Matchers.equalTo;
 
 public class KeywordScriptFieldTypeTests extends AbstractScriptFieldTypeTestCase {
+
+    @Override
+    protected ScriptFactory parseFromSource() {
+        return StringFieldScript.PARSE_FROM_SOURCE;
+    }
+
+    @Override
+    protected ScriptFactory dummyScript() {
+        return StringFieldScriptTests.DUMMY;
+    }
 
     @Override
     public void testDocValues() throws IOException {
@@ -133,7 +144,7 @@ public class KeywordScriptFieldTypeTests extends AbstractScriptFieldTypeTestCase
                             }
                         };
                     }
-                }, searchContext.lookup(), 2.5f, "test", 0, IndexVersion.CURRENT)), equalTo(1));
+                }, searchContext.lookup(), 2.5f, "test", 0, IndexVersion.current())), equalTo(1));
             }
         }
     }

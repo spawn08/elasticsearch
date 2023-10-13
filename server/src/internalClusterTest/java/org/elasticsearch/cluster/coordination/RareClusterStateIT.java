@@ -14,6 +14,7 @@ import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.action.ActionRequest;
 import org.elasticsearch.action.ActionRequestBuilder;
 import org.elasticsearch.action.ActionResponse;
+import org.elasticsearch.action.DocWriteResponse;
 import org.elasticsearch.action.index.IndexResponse;
 import org.elasticsearch.action.support.PlainActionFuture;
 import org.elasticsearch.action.support.master.AcknowledgedResponse;
@@ -180,7 +181,7 @@ public class RareClusterStateIT extends ESIntegTestCase {
     public void testDeleteCreateInOneBulk() throws Exception {
         internalCluster().startMasterOnlyNode();
         String dataNode = internalCluster().startDataOnlyNode();
-        assertFalse(client().admin().cluster().prepareHealth().setWaitForNodes("2").get().isTimedOut());
+        assertFalse(clusterAdmin().prepareHealth().setWaitForNodes("2").get().isTimedOut());
         prepareCreate("test").setSettings(Settings.builder().put(IndexMetadata.SETTING_NUMBER_OF_REPLICAS, 0)).get();
         ensureGreen("test");
 
@@ -224,7 +225,7 @@ public class RareClusterStateIT extends ESIntegTestCase {
         // operation yet
 
         final List<String> nodeNames = internalCluster().startNodes(2);
-        assertFalse(client().admin().cluster().prepareHealth().setWaitForNodes("2").get().isTimedOut());
+        assertFalse(clusterAdmin().prepareHealth().setWaitForNodes("2").get().isTimedOut());
 
         final String master = internalCluster().getMasterName();
         assertThat(nodeNames, hasItem(master));
@@ -242,7 +243,7 @@ public class RareClusterStateIT extends ESIntegTestCase {
         ensureGreen();
 
         // Check routing tables
-        ClusterState state = client().admin().cluster().prepareState().get().getState();
+        ClusterState state = clusterAdmin().prepareState().get().getState();
         assertEquals(master, state.nodes().getMasterNode().getName());
         List<ShardRouting> shards = state.routingTable().allShards("index");
         assertThat(shards, hasSize(1));
@@ -283,7 +284,7 @@ public class RareClusterStateIT extends ESIntegTestCase {
 
         // this request does not change the cluster state, because mapping is already created,
         // we don't await and cancel committed publication
-        ActionFuture<IndexResponse> docIndexResponse = client().prepareIndex("index").setId("1").setSource("field", 42).execute();
+        ActionFuture<DocWriteResponse> docIndexResponse = client().prepareIndex("index").setId("1").setSource("field", 42).execute();
 
         // Wait a bit to make sure that the reason why we did not get a response
         // is that cluster state processing is blocked and not just that it takes
@@ -306,7 +307,7 @@ public class RareClusterStateIT extends ESIntegTestCase {
         // are needed for a document are not available on the replica at the
         // time of indexing it
         final List<String> nodeNames = internalCluster().startNodes(2);
-        assertFalse(client().admin().cluster().prepareHealth().setWaitForNodes("2").get().isTimedOut());
+        assertFalse(clusterAdmin().prepareHealth().setWaitForNodes("2").get().isTimedOut());
 
         final String master = internalCluster().getMasterName();
         assertThat(nodeNames, hasItem(master));
@@ -326,7 +327,7 @@ public class RareClusterStateIT extends ESIntegTestCase {
         ensureGreen();
 
         // Check routing tables
-        ClusterState state = client().admin().cluster().prepareState().get().getState();
+        ClusterState state = clusterAdmin().prepareState().get().getState();
         assertEquals(master, state.nodes().getMasterNode().getName());
         List<ShardRouting> shards = state.routingTable().allShards("index");
         assertThat(shards, hasSize(2));
@@ -372,7 +373,7 @@ public class RareClusterStateIT extends ESIntegTestCase {
             assertEquals(minVersion, maxVersion);
         });
 
-        final ActionFuture<IndexResponse> docIndexResponse = client().prepareIndex("index").setId("1").setSource("field", 42).execute();
+        final ActionFuture<DocWriteResponse> docIndexResponse = client().prepareIndex("index").setId("1").setSource("field", 42).execute();
 
         assertBusy(() -> assertTrue(client().prepareGet("index", "1").get().isExists()));
 
@@ -381,7 +382,7 @@ public class RareClusterStateIT extends ESIntegTestCase {
         // if the dynamic mapping update is not applied on the replica yet.
         // this request does not change the cluster state, because the mapping is dynamic,
         // we need to await and cancel committed publication
-        ActionFuture<IndexResponse> dynamicMappingsFut = executeAndCancelCommittedPublication(
+        ActionFuture<DocWriteResponse> dynamicMappingsFut = executeAndCancelCommittedPublication(
             client().prepareIndex("index").setId("2").setSource("field2", 42)
         );
 

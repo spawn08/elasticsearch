@@ -33,6 +33,7 @@ import org.elasticsearch.script.DocReader;
 import org.elasticsearch.script.GeoPointFieldScript;
 import org.elasticsearch.script.ScoreScript;
 import org.elasticsearch.script.Script;
+import org.elasticsearch.script.ScriptFactory;
 import org.elasticsearch.script.ScriptType;
 import org.elasticsearch.search.MultiValueMode;
 import org.elasticsearch.search.lookup.Source;
@@ -46,6 +47,16 @@ import static java.util.Collections.emptyMap;
 import static org.hamcrest.Matchers.equalTo;
 
 public class GeoPointScriptFieldTypeTests extends AbstractNonTextScriptFieldTypeTestCase {
+
+    @Override
+    protected ScriptFactory parseFromSource() {
+        return GeoPointFieldScript.PARSE_FROM_SOURCE;
+    }
+
+    @Override
+    protected ScriptFactory dummyScript() {
+        return GeoPointFieldScriptTests.DUMMY;
+    }
 
     @Override
     protected boolean supportsTermQueries() {
@@ -148,7 +159,7 @@ public class GeoPointScriptFieldTypeTests extends AbstractNonTextScriptFieldType
                             }
                         };
                     }
-                }, searchContext.lookup(), 2.5f, "test", 0, IndexVersion.CURRENT)), equalTo(1));
+                }, searchContext.lookup(), 2.5f, "test", 0, IndexVersion.current())), equalTo(1));
             }
         }
     }
