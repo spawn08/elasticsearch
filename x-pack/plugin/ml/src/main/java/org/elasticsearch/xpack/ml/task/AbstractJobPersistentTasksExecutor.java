@@ -66,7 +66,9 @@ public abstract class AbstractJobPersistentTasksExecutor<Params extends Persiste
                 continue;
             }
             IndexRoutingTable routingTable = clusterState.getRoutingTable().index(index);
-            if (routingTable == null || routingTable.allPrimaryShardsActive() == false) {
+            if (routingTable == null
+                || routingTable.allPrimaryShardsActive() == false
+                || routingTable.readyForSearch(clusterState) == false) {
                 unavailableIndices.add(index);
             }
         }
@@ -90,13 +92,13 @@ public abstract class AbstractJobPersistentTasksExecutor<Params extends Persiste
 
     protected AbstractJobPersistentTasksExecutor(
         String taskName,
-        String executor,
+        String executorName,
         Settings settings,
         ClusterService clusterService,
         MlMemoryTracker memoryTracker,
         IndexNameExpressionResolver expressionResolver
     ) {
-        super(taskName, executor);
+        super(taskName, clusterService.threadPool().executor(executorName));
         this.memoryTracker = Objects.requireNonNull(memoryTracker);
         this.expressionResolver = Objects.requireNonNull(expressionResolver);
         this.maxConcurrentJobAllocations = MachineLearning.CONCURRENT_JOB_ALLOCATIONS.get(settings);

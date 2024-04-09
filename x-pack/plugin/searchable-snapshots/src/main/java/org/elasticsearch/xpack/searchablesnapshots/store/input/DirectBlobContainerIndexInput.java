@@ -300,6 +300,10 @@ public final class DirectBlobContainerIndexInput extends BlobCacheBufferedIndexI
     @Override
     public IndexInput slice(String sliceName, long offset, long length) throws IOException {
         BlobCacheUtils.ensureSlice(sliceName, offset, length, this);
+        var bufferSlice = trySliceBuffer(sliceName, offset, length);
+        if (bufferSlice != null) {
+            return bufferSlice;
+        }
         final DirectBlobContainerIndexInput slice = new DirectBlobContainerIndexInput(
             sliceName,
             blobContainer,
@@ -341,7 +345,7 @@ public final class DirectBlobContainerIndexInput extends BlobCacheBufferedIndexI
     private InputStream openBlobStream(int part, long pos, long length) throws IOException {
         assert MetadataCachingIndexInput.assertCurrentThreadMayAccessBlobStore();
         stats.addBlobStoreBytesRequested(length);
-        return blobContainer.readBlob(OperationPurpose.SNAPSHOT, fileInfo.partName(part), pos, length);
+        return blobContainer.readBlob(OperationPurpose.SNAPSHOT_DATA, fileInfo.partName(part), pos, length);
     }
 
     private static class StreamForSequentialReads implements Closeable {

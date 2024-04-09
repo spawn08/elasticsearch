@@ -13,6 +13,7 @@ import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.painless.Compiler.Loader;
 import org.elasticsearch.painless.lookup.PainlessLookup;
 import org.elasticsearch.painless.lookup.PainlessLookupBuilder;
+import org.elasticsearch.painless.lookup.PainlessMethod;
 import org.elasticsearch.painless.spi.Whitelist;
 import org.elasticsearch.painless.symbol.ScriptScope;
 import org.elasticsearch.script.ScriptContext;
@@ -84,9 +85,11 @@ public final class PainlessScriptEngine implements ScriptEngine {
         Map<ScriptContext<?>, Compiler> mutableContextsToCompilers = new HashMap<>();
         Map<ScriptContext<?>, PainlessLookup> mutableContextsToLookups = new HashMap<>();
 
+        final Map<Object, Object> dedup = new HashMap<>();
+        final Map<PainlessMethod, PainlessMethod> filteredMethodCache = new HashMap<>();
         for (Map.Entry<ScriptContext<?>, List<Whitelist>> entry : contexts.entrySet()) {
             ScriptContext<?> context = entry.getKey();
-            PainlessLookup lookup = PainlessLookupBuilder.buildFromWhitelists(entry.getValue());
+            PainlessLookup lookup = PainlessLookupBuilder.buildFromWhitelists(entry.getValue(), dedup, filteredMethodCache);
             mutableContextsToCompilers.put(
                 context,
                 new Compiler(context.instanceClazz, context.factoryClazz, context.statefulFactoryClazz, lookup)
@@ -422,7 +425,7 @@ public final class PainlessScriptEngine implements ScriptEngine {
             // Except regexes enabled - this is a node level setting and can't be changed in the request.
             compilerSettings.setRegexesEnabled(defaultCompilerSettings.areRegexesEnabled());
 
-            compilerSettings.setRegexLimitFactor(defaultCompilerSettings.getRegexLimitFactor());
+            compilerSettings.setRegexLimitFactor(defaultCompilerSettings.getAppliedRegexLimitFactor());
 
             Map<String, String> copy = new HashMap<>(params);
 
@@ -495,7 +498,8 @@ public final class PainlessScriptEngine implements ScriptEngine {
                 break;
             }
         }
-        throw new ScriptException("compile error", t, scriptStack, scriptSource, PainlessScriptEngine.NAME, pos);
+        Throwable cause = ErrorCauseWrapper.maybeWrap(t);
+        throw new ScriptException("compile error", cause, scriptStack, scriptSource, PainlessScriptEngine.NAME, pos);
     }
 
     // very simple heuristic: +/- 25 chars. can be improved later.

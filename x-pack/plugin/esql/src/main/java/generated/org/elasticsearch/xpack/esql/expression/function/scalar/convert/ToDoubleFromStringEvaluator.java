@@ -14,6 +14,7 @@ import org.elasticsearch.compute.data.DoubleBlock;
 import org.elasticsearch.compute.data.Vector;
 import org.elasticsearch.compute.operator.DriverContext;
 import org.elasticsearch.compute.operator.EvalOperator;
+import org.elasticsearch.xpack.ql.InvalidArgumentException;
 import org.elasticsearch.xpack.ql.tree.Source;
 
 /**
@@ -39,21 +40,22 @@ public final class ToDoubleFromStringEvaluator extends AbstractConvertFunction.A
     if (vector.isConstant()) {
       try {
         return driverContext.blockFactory().newConstantDoubleBlockWith(evalValue(vector, 0, scratchPad), positionCount);
-      } catch (Exception e) {
+      } catch (InvalidArgumentException  e) {
         registerException(e);
-        return Block.constantNullBlock(positionCount, driverContext.blockFactory());
+        return driverContext.blockFactory().newConstantNullBlock(positionCount);
       }
     }
-    DoubleBlock.Builder builder = DoubleBlock.newBlockBuilder(positionCount, driverContext.blockFactory());
-    for (int p = 0; p < positionCount; p++) {
-      try {
-        builder.appendDouble(evalValue(vector, p, scratchPad));
-      } catch (Exception e) {
-        registerException(e);
-        builder.appendNull();
+    try (DoubleBlock.Builder builder = driverContext.blockFactory().newDoubleBlockBuilder(positionCount)) {
+      for (int p = 0; p < positionCount; p++) {
+        try {
+          builder.appendDouble(evalValue(vector, p, scratchPad));
+        } catch (InvalidArgumentException  e) {
+          registerException(e);
+          builder.appendNull();
+        }
       }
+      return builder.build();
     }
-    return builder.build();
   }
 
   private static double evalValue(BytesRefVector container, int index, BytesRef scratchPad) {
@@ -65,7 +67,7 @@ public final class ToDoubleFromStringEvaluator extends AbstractConvertFunction.A
   public Block evalBlock(Block b) {
     BytesRefBlock block = (BytesRefBlock) b;
     int positionCount = block.getPositionCount();
-    try (DoubleBlock.Builder builder = DoubleBlock.newBlockBuilder(positionCount, driverContext.blockFactory())) {
+    try (DoubleBlock.Builder builder = driverContext.blockFactory().newDoubleBlockBuilder(positionCount)) {
       BytesRef scratchPad = new BytesRef();
       for (int p = 0; p < positionCount; p++) {
         int valueCount = block.getValueCount(p);
@@ -82,7 +84,7 @@ public final class ToDoubleFromStringEvaluator extends AbstractConvertFunction.A
             }
             builder.appendDouble(value);
             valuesAppended = true;
-          } catch (Exception e) {
+          } catch (InvalidArgumentException  e) {
             registerException(e);
           }
         }
@@ -99,5 +101,26 @@ public final class ToDoubleFromStringEvaluator extends AbstractConvertFunction.A
   private static double evalValue(BytesRefBlock container, int index, BytesRef scratchPad) {
     BytesRef value = container.getBytesRef(index, scratchPad);
     return ToDouble.fromKeyword(value);
+  }
+
+  public static class Factory implements EvalOperator.ExpressionEvaluator.Factory {
+    private final Source source;
+
+    private final EvalOperator.ExpressionEvaluator.Factory field;
+
+    public Factory(EvalOperator.ExpressionEvaluator.Factory field, Source source) {
+      this.field = field;
+      this.source = source;
+    }
+
+    @Override
+    public ToDoubleFromStringEvaluator get(DriverContext context) {
+      return new ToDoubleFromStringEvaluator(field.get(context), source, context);
+    }
+
+    @Override
+    public String toString() {
+      return "ToDoubleFromStringEvaluator[field=" + field + "]";
+    }
   }
 }

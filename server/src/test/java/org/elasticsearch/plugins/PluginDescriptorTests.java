@@ -8,7 +8,7 @@
 
 package org.elasticsearch.plugins;
 
-import org.elasticsearch.Version;
+import org.elasticsearch.Build;
 import org.elasticsearch.action.admin.cluster.node.info.PluginsAndModules;
 import org.elasticsearch.common.io.stream.ByteBufferStreamInput;
 import org.elasticsearch.common.io.stream.BytesStreamOutput;
@@ -24,6 +24,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
 
+import static org.elasticsearch.test.hamcrest.OptionalMatchers.isEmpty;
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.empty;
@@ -41,7 +42,7 @@ public class PluginDescriptorTests extends ESTestCase {
         "version",
         "1.0",
         "elasticsearch.version",
-        Version.CURRENT.toString(),
+        Build.current().version(),
         "java.version",
         System.getProperty("java.specification.version"),
         "classname",
@@ -58,7 +59,7 @@ public class PluginDescriptorTests extends ESTestCase {
         "version",
         "1.0",
         "elasticsearch.version",
-        Version.CURRENT.toString(),
+        Build.current().version(),
         "java.version",
         System.getProperty("java.specification.version"),
         "modular",
@@ -176,13 +177,6 @@ public class PluginDescriptorTests extends ESTestCase {
         });
     }
 
-    public void testReadFromPropertiesBogusElasticsearchVersion() throws Exception {
-        assertBothDescriptors(writer -> {
-            var e = expectThrows(IllegalArgumentException.class, () -> writer.write("elasticsearch.version", "bogus"));
-            assertThat(e.getMessage(), containsString("version needs to contain major, minor, and revision"));
-        });
-    }
-
     public void testReadFromPropertiesJvmMissingClassname() throws Exception {
         IllegalArgumentException e = expectThrows(IllegalArgumentException.class, () -> mockInternalDescriptor("classname", null));
         assertThat(e.getMessage(), containsString("property [classname] is missing"));
@@ -190,14 +184,14 @@ public class PluginDescriptorTests extends ESTestCase {
 
     public void testReadFromPropertiesModulenameFallback() throws Exception {
         PluginDescriptor info = mockInternalDescriptor("modulename", null);
-        assertThat(info.getModuleName().isPresent(), is(false));
+        assertThat(info.getModuleName(), isEmpty());
         assertThat(info.isModular(), is(false));
         assertThat(info.getExtendedPlugins(), empty());
     }
 
     public void testReadFromPropertiesModulenameEmpty() throws Exception {
         PluginDescriptor info = mockInternalDescriptor("modulename", " ");
-        assertThat(info.getModuleName().isPresent(), is(false));
+        assertThat(info.getModuleName(), isEmpty());
         assertThat(info.isModular(), is(false));
         assertThat(info.getExtendedPlugins(), empty());
     }
@@ -227,7 +221,7 @@ public class PluginDescriptorTests extends ESTestCase {
             "c",
             "foo",
             "dummy",
-            Version.CURRENT,
+            Build.current().version(),
             "1.8",
             "dummyclass",
             null,
@@ -250,7 +244,7 @@ public class PluginDescriptorTests extends ESTestCase {
             "c",
             "foo",
             "dummy",
-            Version.CURRENT,
+            Build.current().version(),
             "1.8",
             "dummyclass",
             "some.module",
@@ -283,7 +277,7 @@ public class PluginDescriptorTests extends ESTestCase {
             name,
             "foo",
             "dummy",
-            Version.CURRENT,
+            Build.current().version(),
             "1.8",
             "dummyclass",
             null,
@@ -327,7 +321,7 @@ public class PluginDescriptorTests extends ESTestCase {
             "c",
             "foo",
             "dummy",
-            Version.CURRENT,
+            Build.current().version(),
             "1.8",
             classname,
             null,
@@ -342,7 +336,7 @@ public class PluginDescriptorTests extends ESTestCase {
             descriptor1.getName(),
             randomValueOtherThan(descriptor1.getDescription(), () -> randomAlphaOfLengthBetween(4, 12)),
             randomValueOtherThan(descriptor1.getVersion(), () -> randomAlphaOfLengthBetween(4, 12)),
-            descriptor1.getElasticsearchVersion().previousMajor(),
+            "8.0.0",
             randomValueOtherThan(descriptor1.getJavaVersion(), () -> randomAlphaOfLengthBetween(4, 12)),
             descriptor1.isStable() ? randomAlphaOfLengthBetween(4, 12) : null,
             descriptor1.isStable() ? randomAlphaOfLength(6) : null,

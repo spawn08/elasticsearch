@@ -54,7 +54,7 @@ public class PluginDescriptor implements Writeable, ToXContentObject {
     private final String name;
     private final String description;
     private final String version;
-    private final Version elasticsearchVersion;
+    private final String elasticsearchVersion;
     private final String javaVersion;
     private final String classname;
     private final String moduleName;
@@ -84,7 +84,7 @@ public class PluginDescriptor implements Writeable, ToXContentObject {
         String name,
         String description,
         String version,
-        Version elasticsearchVersion,
+        String elasticsearchVersion,
         String javaVersion,
         String classname,
         String moduleName,
@@ -120,9 +120,13 @@ public class PluginDescriptor implements Writeable, ToXContentObject {
         this.name = in.readString();
         this.description = in.readString();
         this.version = in.readString();
-        elasticsearchVersion = Version.readVersion(in);
+        if (in.getTransportVersion().before(TransportVersions.V_8_12_0)) {
+            elasticsearchVersion = Version.readVersion(in).toString();
+        } else {
+            elasticsearchVersion = in.readString();
+        }
         javaVersion = in.readString();
-        if (in.getTransportVersion().onOrAfter(TransportVersions.PLUGIN_DESCRIPTOR_OPTIONAL_CLASSNAME)) {
+        if (in.getTransportVersion().onOrAfter(TransportVersions.V_8_12_0)) {
             this.classname = in.readOptionalString();
         } else {
             this.classname = in.readString();
@@ -161,9 +165,13 @@ public class PluginDescriptor implements Writeable, ToXContentObject {
         out.writeString(name);
         out.writeString(description);
         out.writeString(version);
-        Version.writeVersion(elasticsearchVersion, out);
+        if (out.getTransportVersion().before(TransportVersions.V_8_12_0)) {
+            Version.writeVersion(Version.fromString(elasticsearchVersion), out);
+        } else {
+            out.writeString(elasticsearchVersion);
+        }
         out.writeString(javaVersion);
-        if (out.getTransportVersion().onOrAfter(TransportVersions.PLUGIN_DESCRIPTOR_OPTIONAL_CLASSNAME)) {
+        if (out.getTransportVersion().onOrAfter(TransportVersions.V_8_12_0)) {
             out.writeOptionalString(classname);
         } else {
             out.writeString(classname);
@@ -254,7 +262,7 @@ public class PluginDescriptor implements Writeable, ToXContentObject {
         String name = readNonEmptyString(propsMap, filename, "name");
         String desc = readString(propsMap, name, "description");
         String ver = readString(propsMap, name, "version");
-        Version esVer = readElasticsearchVersion(propsMap, name);
+        String esVer = readElasticsearchVersion(propsMap, name);
         String javaVer = readJavaVersion(propsMap, name);
 
         String extendedString = propsMap.remove("extended.plugins");
@@ -280,7 +288,7 @@ public class PluginDescriptor implements Writeable, ToXContentObject {
         String name = readNonEmptyString(propsMap, filename, "name");
         String desc = readString(propsMap, name, "description");
         String ver = readString(propsMap, name, "version");
-        Version esVer = readElasticsearchVersion(propsMap, name);
+        String esVer = readElasticsearchVersion(propsMap, name);
         String javaVer = readJavaVersion(propsMap, name);
         boolean isModular = readBoolean(propsMap, name, "modular");
 
@@ -303,9 +311,8 @@ public class PluginDescriptor implements Writeable, ToXContentObject {
         return value;
     }
 
-    private static Version readElasticsearchVersion(Map<String, String> propsMap, String pluginId) {
-        String esVersionString = readNonEmptyString(propsMap, pluginId, "elasticsearch.version");
-        return Version.fromString(esVersionString);
+    private static String readElasticsearchVersion(Map<String, String> propsMap, String pluginId) {
+        return readNonEmptyString(propsMap, pluginId, "elasticsearch.version");
     }
 
     private static String readJavaVersion(Map<String, String> propsMap, String pluginId) {
@@ -392,7 +399,7 @@ public class PluginDescriptor implements Writeable, ToXContentObject {
      *
      * @return an Elasticsearch version
      */
-    public Version getElasticsearchVersion() {
+    public String getElasticsearchVersion() {
         return elasticsearchVersion;
     }
 

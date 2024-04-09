@@ -7,18 +7,22 @@
 
 package org.elasticsearch.xpack.esql.parser;
 
+import org.elasticsearch.action.search.SearchRequest;
+import org.elasticsearch.common.Randomness;
 import org.elasticsearch.core.Tuple;
 import org.elasticsearch.test.ESTestCase;
+import org.elasticsearch.xpack.esql.VerificationException;
 import org.elasticsearch.xpack.esql.evaluator.predicate.operator.comparison.Equals;
 import org.elasticsearch.xpack.esql.evaluator.predicate.operator.comparison.GreaterThan;
 import org.elasticsearch.xpack.esql.evaluator.predicate.operator.comparison.GreaterThanOrEqual;
 import org.elasticsearch.xpack.esql.evaluator.predicate.operator.comparison.LessThan;
 import org.elasticsearch.xpack.esql.evaluator.predicate.operator.comparison.LessThanOrEqual;
-import org.elasticsearch.xpack.esql.evaluator.predicate.operator.regex.RLike;
-import org.elasticsearch.xpack.esql.evaluator.predicate.operator.regex.WildcardLike;
+import org.elasticsearch.xpack.esql.expression.function.scalar.string.RLike;
+import org.elasticsearch.xpack.esql.expression.function.scalar.string.WildcardLike;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Add;
 import org.elasticsearch.xpack.esql.plan.logical.Dissect;
 import org.elasticsearch.xpack.esql.plan.logical.Enrich;
+import org.elasticsearch.xpack.esql.plan.logical.EsqlAggregate;
 import org.elasticsearch.xpack.esql.plan.logical.EsqlUnresolvedRelation;
 import org.elasticsearch.xpack.esql.plan.logical.Eval;
 import org.elasticsearch.xpack.esql.plan.logical.Explain;
@@ -26,8 +30,10 @@ import org.elasticsearch.xpack.esql.plan.logical.Grok;
 import org.elasticsearch.xpack.esql.plan.logical.InlineStats;
 import org.elasticsearch.xpack.esql.plan.logical.MvExpand;
 import org.elasticsearch.xpack.esql.plan.logical.Row;
+import org.elasticsearch.xpack.ql.capabilities.UnresolvedException;
 import org.elasticsearch.xpack.ql.expression.Alias;
 import org.elasticsearch.xpack.ql.expression.EmptyAttribute;
+import org.elasticsearch.xpack.ql.expression.Expressions;
 import org.elasticsearch.xpack.ql.expression.Literal;
 import org.elasticsearch.xpack.ql.expression.NamedExpression;
 import org.elasticsearch.xpack.ql.expression.Order;
@@ -36,20 +42,26 @@ import org.elasticsearch.xpack.ql.expression.UnresolvedAttribute;
 import org.elasticsearch.xpack.ql.expression.function.UnresolvedFunction;
 import org.elasticsearch.xpack.ql.expression.predicate.logical.Not;
 import org.elasticsearch.xpack.ql.expression.predicate.operator.comparison.BinaryComparison;
-import org.elasticsearch.xpack.ql.plan.logical.Aggregate;
 import org.elasticsearch.xpack.ql.plan.logical.Filter;
 import org.elasticsearch.xpack.ql.plan.logical.Limit;
 import org.elasticsearch.xpack.ql.plan.logical.LogicalPlan;
 import org.elasticsearch.xpack.ql.plan.logical.OrderBy;
+import org.elasticsearch.xpack.ql.plan.logical.Project;
 import org.elasticsearch.xpack.ql.type.DataType;
 import org.elasticsearch.xpack.ql.type.DataTypes;
+import org.elasticsearch.xpack.versionfield.Version;
 
 import java.math.BigInteger;
+import java.time.Duration;
+import java.time.Period;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Function;
 
+import static org.elasticsearch.xpack.esql.EsqlTestUtils.as;
+import static org.elasticsearch.xpack.esql.parser.ExpressionBuilder.breakIntoFragments;
 import static org.elasticsearch.xpack.ql.expression.Literal.FALSE;
 import static org.elasticsearch.xpack.ql.expression.Literal.TRUE;
 import static org.elasticsearch.xpack.ql.expression.function.FunctionResolutionStrategy.DEFAULT;
@@ -57,8 +69,10 @@ import static org.elasticsearch.xpack.ql.tree.Source.EMPTY;
 import static org.elasticsearch.xpack.ql.type.DataTypes.KEYWORD;
 import static org.elasticsearch.xpack.ql.util.NumericUtils.asLongUnsigned;
 import static org.hamcrest.Matchers.allOf;
+import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.instanceOf;
 import static org.hamcrest.Matchers.is;
 
@@ -218,7 +232,7 @@ public class StatementParserTests extends ESTestCase {
                 List.of(
                     new Alias(
                         EMPTY,
-                        "fn(a+1)",
+                        "fn(a + 1)",
                         new UnresolvedFunction(EMPTY, "fn", DEFAULT, List.of(new Add(EMPTY, attribute("a"), integer(1))))
                     )
                 )
@@ -229,7 +243,7 @@ public class StatementParserTests extends ESTestCase {
 
     public void testStatsWithGroups() {
         assertEquals(
-            new Aggregate(
+            new EsqlAggregate(
                 EMPTY,
                 PROCESSING_CMD_INPUT,
                 List.of(attribute("c"), attribute("d.e")),
@@ -245,7 +259,7 @@ public class StatementParserTests extends ESTestCase {
 
     public void testStatsWithoutGroups() {
         assertEquals(
-            new Aggregate(
+            new EsqlAggregate(
                 EMPTY,
                 PROCESSING_CMD_INPUT,
                 List.of(),
@@ -260,7 +274,7 @@ public class StatementParserTests extends ESTestCase {
 
     public void testStatsWithoutAggs() throws Exception {
         assertEquals(
-            new Aggregate(EMPTY, PROCESSING_CMD_INPUT, List.of(attribute("a")), List.of(attribute("a"))),
+            new EsqlAggregate(EMPTY, PROCESSING_CMD_INPUT, List.of(attribute("a")), List.of(attribute("a"))),
             processingCommand("stats by a")
         );
     }
@@ -286,7 +300,7 @@ public class StatementParserTests extends ESTestCase {
             """ };
 
         for (String query : queries) {
-            expectError(query, "Cannot specify grouping expression [a] as an aggregate");
+            expectVerificationError(query, "grouping key [a] already specified in the STATS BY clause");
         }
     }
 
@@ -571,35 +585,133 @@ public class StatementParserTests extends ESTestCase {
     }
 
     public void testMetadataFieldOnOtherSources() {
+        expectError("row a = 1 metadata _index", "line 1:20: extraneous input '_index' expecting <EOF>");
+        expectError("meta functions metadata _index", "line 1:16: token recognition error at: 'm'");
+        expectError("show info metadata _index", "line 1:11: token recognition error at: 'm'");
         expectError(
-            "row a = 1 [metadata _index]",
-            "1:11: mismatched input '[' expecting {<EOF>, PIPE, 'and', COMMA, 'or', '+', '-', '*', '/', '%'}"
-        );
-        expectError("show functions [metadata _index]", "line 1:16: mismatched input '[' expecting {<EOF>, PIPE}");
-        expectError(
-            "explain [from foo] [metadata _index]",
-            "line 1:20: mismatched input '[' expecting {PIPE, COMMA, OPENING_BRACKET, ']'}"
+            "explain [from foo] metadata _index",
+            "line 1:20: mismatched input 'metadata' expecting {'|', ',', OPENING_BRACKET, ']', 'options', 'metadata'}"
         );
     }
 
     public void testMetadataFieldMultipleDeclarations() {
-        expectError("from test [metadata _index, _version, _index]", "1:40: metadata field [_index] already declared [@1:21]");
+        expectError("from test metadata _index, _version, _index", "1:39: metadata field [_index] already declared [@1:20]");
     }
 
     public void testMetadataFieldUnsupportedPrimitiveType() {
-        expectError("from test [metadata _tier]", "line 1:22: unsupported metadata field [_tier]");
+        expectError("from test metadata _tier", "line 1:21: unsupported metadata field [_tier]");
     }
 
     public void testMetadataFieldUnsupportedCustomType() {
-        expectError("from test [metadata _feature]", "line 1:22: unsupported metadata field [_feature]");
+        expectError("from test metadata _feature", "line 1:21: unsupported metadata field [_feature]");
     }
 
     public void testMetadataFieldNotFoundNonExistent() {
-        expectError("from test [metadata _doesnot_compute]", "line 1:22: unsupported metadata field [_doesnot_compute]");
+        expectError("from test metadata _doesnot_compute", "line 1:21: unsupported metadata field [_doesnot_compute]");
     }
 
     public void testMetadataFieldNotFoundNormalField() {
-        expectError("from test [metadata emp_no]", "line 1:22: unsupported metadata field [emp_no]");
+        expectError("from test metadata emp_no", "line 1:21: unsupported metadata field [emp_no]");
+    }
+
+    public void testFromOptionsUnknownName() {
+        expectError(FROM + " options \"foo\"=\"oof\",\"bar\"=\"rab\"", "line 1:20: invalid options provided: unknown option named [foo]");
+    }
+
+    public void testFromOptionsPartialInvalid() {
+        expectError(
+            FROM + " options \"allow_no_indices\"=\"true\",\"bar\"=\"rab\"",
+            "line 1:46: invalid options provided: unknown option named [bar]"
+        );
+    }
+
+    public void testFromOptionsInvalidIndicesOptionValue() {
+        expectError(
+            FROM + " options \"allow_no_indices\"=\"foo\"",
+            "line 1:20: invalid options provided: Could not convert [allow_no_indices] to boolean"
+        );
+    }
+
+    public void testFromOptionsEmptyIndicesOptionName() {
+        expectError(FROM + " options \"\"=\"true\"", "line 1:20: invalid options provided: unknown option named []");
+    }
+
+    public void testFromOptionsEmptyIndicesOptionValue() {
+        expectError(
+            FROM + " options \"allow_no_indices\"=\"\"",
+            "line 1:20: invalid options provided: Could not convert [allow_no_indices] to boolean. "
+                + "Failed to parse value [] as only [true] or [false] are allowed."
+        );
+        expectError(
+            FROM + " options \"ignore_unavailable\"=\"TRUE\"",
+            "line 1:20: invalid options provided: Could not convert [ignore_unavailable] to boolean. "
+                + "Failed to parse value [TRUE] as only [true] or [false] are allowed."
+        );
+        expectError(FROM + " options \"preference\"=\"\"", "line 1:20: invalid options provided: no Preference for []");
+    }
+
+    public void testFromOptionsSuggestedOptionName() {
+        expectError(
+            FROM + " options \"allow_indices\"=\"true\"",
+            "line 1:20: invalid options provided: unknown option named [allow_indices], did you mean [allow_no_indices]?"
+        );
+    }
+
+    public void testFromOptionsInvalidPreferValue() {
+        expectError(FROM + " options \"preference\"=\"_foo\"", "line 1:20: invalid options provided: no Preference for [_foo]");
+    }
+
+    public void testFromOptionsUnquotedName() {
+        expectError(FROM + " options allow_no_indices=\"oof\"", "line 1:19: mismatched input 'allow_no_indices' expecting QUOTED_STRING");
+    }
+
+    public void testFromOptionsUnquotedValue() {
+        expectError(FROM + " options \"allow_no_indices\"=oof", "line 1:38: mismatched input 'oof' expecting QUOTED_STRING");
+    }
+
+    public void testFromOptionsDuplicates() {
+        for (var name : List.of("allow_no_indices", "ignore_unavailable", "preference")) {
+            String options = '"' + name + "\"=\"false\"";
+            options += ',' + options;
+            expectError(FROM + " options " + options, "invalid options provided: option [" + name + "] has already been provided");
+        }
+    }
+
+    public void testFromOptionsValues() {
+        boolean allowNoIndices = randomBoolean();
+        boolean ignoreUnavailable = randomBoolean();
+        String idsList = String.join(",", randomList(1, 5, () -> randomAlphaOfLengthBetween(1, 25)));
+        String preference = randomFrom(
+            "_only_local",
+            "_local",
+            "_only_nodes:" + idsList,
+            "_prefer_nodes:" + idsList,
+            "_shards:" + idsList,
+            randomAlphaOfLengthBetween(1, 25)
+        );
+        List<String> options = new ArrayList<>(3);
+        options.add("\"allow_no_indices\"=\"" + allowNoIndices + "\"");
+        options.add("\"ignore_unavailable\"=\"" + ignoreUnavailable + "\"");
+        options.add("\"preference\"=\"" + preference + "\"");
+        Randomness.shuffle(options);
+        String optionsList = String.join(",", options);
+
+        var plan = statement(FROM + " OPTIONS " + optionsList);
+        var unresolved = as(plan, EsqlUnresolvedRelation.class);
+        assertNotNull(unresolved.esSourceOptions());
+        var indicesOptions = unresolved.esSourceOptions().indicesOptions(SearchRequest.DEFAULT_INDICES_OPTIONS);
+        assertThat(indicesOptions.allowNoIndices(), is(allowNoIndices));
+        assertThat(indicesOptions.ignoreUnavailable(), is(ignoreUnavailable));
+        assertThat(unresolved.esSourceOptions().preference(), is(preference));
+    }
+
+    public void testFromOptionsWithMetadata() {
+        var plan = statement(FROM + " METADATA _id OPTIONS \"preference\"=\"foo\"");
+        var unresolved = as(plan, EsqlUnresolvedRelation.class);
+        assertNotNull(unresolved.esSourceOptions());
+        assertThat(unresolved.esSourceOptions().preference(), is("foo"));
+        assertFalse(unresolved.metadataFields().isEmpty());
+        assertThat(unresolved.metadataFields().get(0).qualifiedName(), is("_id"));
     }
 
     public void testDissectPattern() {
@@ -610,12 +722,14 @@ public class StatementParserTests extends ESTestCase {
         assertEquals("", dissect.parser().appendSeparator());
         assertEquals(List.of(referenceAttribute("foo", KEYWORD)), dissect.extractedFields());
 
-        cmd = processingCommand("dissect a \"%{foo}\" append_separator=\",\"");
-        assertEquals(Dissect.class, cmd.getClass());
-        dissect = (Dissect) cmd;
-        assertEquals("%{foo}", dissect.parser().pattern());
-        assertEquals(",", dissect.parser().appendSeparator());
-        assertEquals(List.of(referenceAttribute("foo", KEYWORD)), dissect.extractedFields());
+        for (String separatorName : List.of("append_separator", "APPEND_SEPARATOR", "AppEnd_SeparAtor")) {
+            cmd = processingCommand("dissect a \"%{foo}\" " + separatorName + "=\",\"");
+            assertEquals(Dissect.class, cmd.getClass());
+            dissect = (Dissect) cmd;
+            assertEquals("%{foo}", dissect.parser().pattern());
+            assertEquals(",", dissect.parser().appendSeparator());
+            assertEquals(List.of(referenceAttribute("foo", KEYWORD)), dissect.extractedFields());
+        }
 
         for (Tuple<String, String> queryWithUnexpectedCmd : List.of(
             Tuple.tuple("from a | dissect foo \"\"", "[]"),
@@ -631,6 +745,7 @@ public class StatementParserTests extends ESTestCase {
             "from a | dissect foo \"%{bar}\" append_separator=3",
             "Invalid value for dissect append_separator: expected a string, but was [3]"
         );
+        expectError("from a | dissect foo \"%{}\"", "Invalid pattern for dissect: [%{}]");
     }
 
     public void testGrokPattern() {
@@ -668,7 +783,16 @@ public class StatementParserTests extends ESTestCase {
 
     public void testEnrich() {
         assertEquals(
-            new Enrich(EMPTY, PROCESSING_CMD_INPUT, new Literal(EMPTY, "countries", KEYWORD), new EmptyAttribute(EMPTY), null, List.of()),
+            new Enrich(
+                EMPTY,
+                PROCESSING_CMD_INPUT,
+                null,
+                new Literal(EMPTY, "countries", KEYWORD),
+                new EmptyAttribute(EMPTY),
+                null,
+                Map.of(),
+                List.of()
+            ),
             processingCommand("enrich countries")
         );
 
@@ -676,12 +800,29 @@ public class StatementParserTests extends ESTestCase {
             new Enrich(
                 EMPTY,
                 PROCESSING_CMD_INPUT,
+                null,
+                new Literal(EMPTY, "index-policy", KEYWORD),
+                new UnresolvedAttribute(EMPTY, "field_underscore"),
+                null,
+                Map.of(),
+                List.of()
+            ),
+            processingCommand("enrich index-policy ON field_underscore")
+        );
+
+        Enrich.Mode mode = randomFrom(Enrich.Mode.values());
+        assertEquals(
+            new Enrich(
+                EMPTY,
+                PROCESSING_CMD_INPUT,
+                mode,
                 new Literal(EMPTY, "countries", KEYWORD),
                 new UnresolvedAttribute(EMPTY, "country_code"),
                 null,
+                Map.of(),
                 List.of()
             ),
-            processingCommand("enrich countries ON country_code")
+            processingCommand("enrich _" + mode.name() + ":countries ON country_code")
         );
 
         expectError("from a | enrich countries on foo* ", "Using wildcards (*) in ENRICH WITH projections is not allowed [foo*]");
@@ -694,6 +835,10 @@ public class StatementParserTests extends ESTestCase {
             "from a | enrich countries on foo with x* = bar ",
             "Using wildcards (*) in ENRICH WITH projections is not allowed [x*]"
         );
+        expectError(
+            "from a | enrich typo:countries on foo",
+            "line 1:18: Unrecognized value [typo], ENRICH policy qualifier needs to be one of [_ANY, _COORDINATOR, _REMOTE]"
+        );
     }
 
     public void testMvExpand() {
@@ -703,16 +848,37 @@ public class StatementParserTests extends ESTestCase {
         assertThat(expand.target(), equalTo(attribute("a")));
     }
 
+    // see https://github.com/elastic/elasticsearch/issues/103331
+    public void testKeepStarMvExpand() {
+        try {
+            String query = "from test | keep * | mv_expand a";
+            var plan = statement(query);
+        } catch (UnresolvedException e) {
+            fail(e, "Regression: https://github.com/elastic/elasticsearch/issues/103331");
+        }
+
+    }
+
     public void testUsageOfProject() {
-        processingCommand("project a");
-        assertWarnings("PROJECT command is no longer supported, please use KEEP instead");
+        String query = "from test | project foo, bar";
+        ParsingException e = expectThrows(ParsingException.class, "Expected syntax error for " + query, () -> statement(query));
+        assertThat(e.getMessage(), containsString("mismatched input 'project' expecting"));
     }
 
     public void testInputParams() {
-        LogicalPlan stm = statement("row x = ?, y = ?", List.of(new TypedParamValue("integer", 1), new TypedParamValue("keyword", "2")));
+        LogicalPlan stm = statement(
+            "row x = ?, y = ?, a = ?, b = ?, c = ?",
+            List.of(
+                new TypedParamValue("integer", 1),
+                new TypedParamValue("keyword", "2"),
+                new TypedParamValue("date_period", "2 days"),
+                new TypedParamValue("time_duration", "4 hours"),
+                new TypedParamValue("version", "1.2.3")
+            )
+        );
         assertThat(stm, instanceOf(Row.class));
         Row row = (Row) stm;
-        assertThat(row.fields().size(), is(2));
+        assertThat(row.fields().size(), is(5));
 
         NamedExpression field = row.fields().get(0);
         assertThat(field.name(), is("x"));
@@ -725,10 +891,86 @@ public class StatementParserTests extends ESTestCase {
         assertThat(field, instanceOf(Alias.class));
         alias = (Alias) field;
         assertThat(alias.child().fold(), is("2"));
+
+        field = row.fields().get(2);
+        assertThat(field.name(), is("a"));
+        assertThat(field, instanceOf(Alias.class));
+        alias = (Alias) field;
+        assertThat(alias.child().fold(), is(Period.ofDays(2)));
+
+        field = row.fields().get(3);
+        assertThat(field.name(), is("b"));
+        assertThat(field, instanceOf(Alias.class));
+        alias = (Alias) field;
+        assertThat(alias.child().fold(), is(Duration.ofHours(4)));
+
+        field = row.fields().get(4);
+        assertThat(field.name(), is("c"));
+        assertThat(field, instanceOf(Alias.class));
+        alias = (Alias) field;
+        assertThat(alias.child().fold().getClass(), is(Version.class));
+        assertThat(alias.child().fold().toString(), is("1.2.3"));
+    }
+
+    public void testWrongIntervalParams() {
+        expectError("row x = ?", List.of(new TypedParamValue("date_period", "12")), "Cannot parse [12] to DATE_PERIOD");
+        expectError("row x = ?", List.of(new TypedParamValue("time_duration", "12")), "Cannot parse [12] to TIME_DURATION");
+        expectError(
+            "row x = ?",
+            List.of(new TypedParamValue("date_period", "12 months foo")),
+            "Cannot parse [12 months foo] to DATE_PERIOD"
+        );
+        expectError(
+            "row x = ?",
+            List.of(new TypedParamValue("time_duration", "12 minutes bar")),
+            "Cannot parse [12 minutes bar] to TIME_DURATION"
+        );
+        expectError("row x = ?", List.of(new TypedParamValue("date_period", "12 foo")), "Unexpected time interval qualifier: 'foo'");
+        expectError("row x = ?", List.of(new TypedParamValue("time_duration", "12 bar")), "Unexpected time interval qualifier: 'bar'");
+        expectError("row x = ?", List.of(new TypedParamValue("date_period", "foo days")), "Cannot parse [foo days] to DATE_PERIOD");
+        expectError(
+            "row x = ?",
+            List.of(new TypedParamValue("time_duration", "bar seconds")),
+            "Cannot parse [bar seconds] to TIME_DURATION"
+        );
+
+        expectError(
+            "row x = ?",
+            List.of(new TypedParamValue("date_period", "2 minutes")),
+            "Cannot parse [2 minutes] to DATE_PERIOD, did you mean TIME_DURATION?"
+        );
+        expectError(
+            "row x = ?",
+            List.of(new TypedParamValue("time_duration", "11 months")),
+            "Cannot parse [11 months] to TIME_DURATION, did you mean DATE_PERIOD?"
+        );
     }
 
     public void testMissingInputParams() {
         expectError("row x = ?, y = ?", List.of(new TypedParamValue("integer", 1)), "Not enough actual parameters 1");
+    }
+
+    public void testFieldContainingDotsAndNumbers() {
+        LogicalPlan where = processingCommand("where `a.b.1m.4321`");
+        assertThat(where, instanceOf(Filter.class));
+        Filter w = (Filter) where;
+        assertThat(w.child(), equalTo(PROCESSING_CMD_INPUT));
+        assertThat(Expressions.name(w.condition()), equalTo("a.b.1m.4321"));
+    }
+
+    public void testFieldQualifiedName() {
+        LogicalPlan where = processingCommand("where a.b.`1m`.`4321`");
+        assertThat(where, instanceOf(Filter.class));
+        Filter w = (Filter) where;
+        assertThat(w.child(), equalTo(PROCESSING_CMD_INPUT));
+        assertThat(Expressions.name(w.condition()), equalTo("a.b.1m.4321"));
+    }
+
+    public void testQuotedName() {
+        // row `my-field`=123 | stats count(`my-field`) | eval x = `count(`my-field`)`
+        LogicalPlan plan = processingCommand("stats count(`my-field`) |  keep `count(``my-field``)`");
+        var project = as(plan, Project.class);
+        assertThat(Expressions.names(project.projections()), contains("count(`my-field`)"));
     }
 
     private void assertIdentifierAsIndexPattern(String identifier, String statement) {
@@ -736,6 +978,53 @@ public class StatementParserTests extends ESTestCase {
         assertThat(from, instanceOf(EsqlUnresolvedRelation.class));
         EsqlUnresolvedRelation table = (EsqlUnresolvedRelation) from;
         assertThat(table.table().index(), is(identifier));
+    }
+
+    public void testIdPatternUnquoted() throws Exception {
+        var string = "regularString";
+        assertThat(breakIntoFragments(string), contains(string));
+    }
+
+    public void testIdPatternQuoted() throws Exception {
+        var string = "`escaped string`";
+        assertThat(breakIntoFragments(string), contains(string));
+    }
+
+    public void testIdPatternQuotedWithDoubleBackticks() throws Exception {
+        var string = "`escaped``string`";
+        assertThat(breakIntoFragments(string), contains(string));
+    }
+
+    public void testIdPatternUnquotedAndQuoted() throws Exception {
+        var string = "this`is`a`mix`of`ids`";
+        assertThat(breakIntoFragments(string), contains("this", "`is`", "a", "`mix`", "of", "`ids`"));
+    }
+
+    public void testIdPatternQuotedTraling() throws Exception {
+        var string = "`foo`*";
+        assertThat(breakIntoFragments(string), contains("`foo`", "*"));
+    }
+
+    public void testIdPatternWithDoubleQuotedStrings() throws Exception {
+        var string = "`this``is`a`quoted `` string``with`backticks";
+        assertThat(breakIntoFragments(string), contains("`this``is`", "a", "`quoted `` string``with`", "backticks"));
+    }
+
+    public void testSpaceNotAllowedInIdPattern() throws Exception {
+        expectError("ROW a = 1| RENAME a AS this is `not okay`", "mismatched input 'is' expecting {'.', 'as'}");
+    }
+
+    public void testSpaceNotAllowedInIdPatternKeep() throws Exception {
+        expectError("ROW a = 1, b = 1| KEEP a b", "extraneous input 'b'");
+    }
+
+    public void testEnrichOnMatchField() {
+        var plan = statement("ROW a = \"1\" | ENRICH languages_policy ON a WITH ```name``* = language_name`");
+        var enrich = as(plan, Enrich.class);
+        var lists = enrich.enrichFields();
+        assertThat(lists, hasSize(1));
+        var ua = as(lists.get(0), UnresolvedAttribute.class);
+        assertThat(ua.name(), is("`name`* = language_name"));
     }
 
     private LogicalPlan statement(String e) {
@@ -814,6 +1103,11 @@ public class StatementParserTests extends ESTestCase {
 
     private void expectError(String query, String errorMessage) {
         ParsingException e = expectThrows(ParsingException.class, "Expected syntax error for " + query, () -> statement(query));
+        assertThat(e.getMessage(), containsString(errorMessage));
+    }
+
+    private void expectVerificationError(String query, String errorMessage) {
+        VerificationException e = expectThrows(VerificationException.class, "Expected syntax error for " + query, () -> statement(query));
         assertThat(e.getMessage(), containsString(errorMessage));
     }
 

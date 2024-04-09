@@ -8,10 +8,9 @@
 package org.elasticsearch.xpack.esql.expression.function.scalar.convert;
 
 import org.apache.lucene.util.BytesRef;
-import org.elasticsearch.common.TriFunction;
 import org.elasticsearch.compute.ann.ConvertEvaluator;
-import org.elasticsearch.compute.operator.DriverContext;
-import org.elasticsearch.compute.operator.EvalOperator;
+import org.elasticsearch.xpack.esql.expression.function.FunctionInfo;
+import org.elasticsearch.xpack.esql.expression.function.Param;
 import org.elasticsearch.xpack.ql.expression.Expression;
 import org.elasticsearch.xpack.ql.tree.NodeInfo;
 import org.elasticsearch.xpack.ql.tree.Source;
@@ -20,29 +19,26 @@ import org.elasticsearch.xpack.ql.type.DataType;
 import java.util.List;
 import java.util.Map;
 
+import static org.elasticsearch.xpack.esql.type.EsqlDataTypeConverter.stringToIP;
 import static org.elasticsearch.xpack.ql.type.DataTypes.IP;
 import static org.elasticsearch.xpack.ql.type.DataTypes.KEYWORD;
-import static org.elasticsearch.xpack.ql.util.StringUtils.parseIP;
+import static org.elasticsearch.xpack.ql.type.DataTypes.TEXT;
 
 public class ToIP extends AbstractConvertFunction {
 
-    private static final Map<
-        DataType,
-        TriFunction<EvalOperator.ExpressionEvaluator, Source, DriverContext, EvalOperator.ExpressionEvaluator>> EVALUATORS = Map.of(
-            IP,
-            (fieldEval, source, driverContext) -> fieldEval,
-            KEYWORD,
-            ToIPFromStringEvaluator::new
-        );
+    private static final Map<DataType, BuildFactory> EVALUATORS = Map.ofEntries(
+        Map.entry(IP, (field, source) -> field),
+        Map.entry(KEYWORD, ToIPFromStringEvaluator.Factory::new),
+        Map.entry(TEXT, ToIPFromStringEvaluator.Factory::new)
+    );
 
-    public ToIP(Source source, Expression field) {
+    @FunctionInfo(returnType = "ip", description = "Converts an input string to an IP value.")
+    public ToIP(Source source, @Param(name = "field", type = { "ip", "keyword", "text" }) Expression field) {
         super(source, field);
     }
 
     @Override
-    protected
-        Map<DataType, TriFunction<EvalOperator.ExpressionEvaluator, Source, DriverContext, EvalOperator.ExpressionEvaluator>>
-        evaluators() {
+    protected Map<DataType, BuildFactory> factories() {
         return EVALUATORS;
     }
 
@@ -61,8 +57,8 @@ public class ToIP extends AbstractConvertFunction {
         return NodeInfo.create(this, ToIP::new, field());
     }
 
-    @ConvertEvaluator(extraName = "FromString")
+    @ConvertEvaluator(extraName = "FromString", warnExceptions = { IllegalArgumentException.class })
     static BytesRef fromKeyword(BytesRef asString) {
-        return parseIP(asString.utf8ToString());
+        return stringToIP(asString);
     }
 }

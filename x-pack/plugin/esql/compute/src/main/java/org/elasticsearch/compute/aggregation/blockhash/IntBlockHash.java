@@ -13,10 +13,10 @@ import org.elasticsearch.common.util.LongHash;
 import org.elasticsearch.compute.aggregation.GroupingAggregatorFunction;
 import org.elasticsearch.compute.aggregation.SeenGroupIds;
 import org.elasticsearch.compute.data.Block;
+import org.elasticsearch.compute.data.BlockFactory;
 import org.elasticsearch.compute.data.IntBlock;
 import org.elasticsearch.compute.data.IntVector;
 import org.elasticsearch.compute.data.Page;
-import org.elasticsearch.compute.operator.DriverContext;
 import org.elasticsearch.compute.operator.MultivalueDedupe;
 import org.elasticsearch.compute.operator.MultivalueDedupeInt;
 
@@ -37,10 +37,10 @@ final class IntBlockHash extends BlockHash {
      */
     private boolean seenNull;
 
-    IntBlockHash(int channel, DriverContext driverContext) {
-        super(driverContext);
+    IntBlockHash(int channel, BlockFactory blockFactory) {
+        super(blockFactory);
         this.channel = channel;
-        this.longHash = new LongHash(1, bigArrays);
+        this.longHash = new LongHash(1, blockFactory.bigArrays());
     }
 
     @Override
@@ -59,8 +59,8 @@ final class IntBlockHash extends BlockHash {
                     addInput.add(0, groupIds);
                 }
             } else {
-                try (IntBlock groupIds = add(intVector).asBlock()) {
-                    addInput.add(0, groupIds.asVector());
+                try (IntVector groupIds = add(intVector)) {
+                    addInput.add(0, groupIds);
                 }
             }
         }
@@ -68,7 +68,7 @@ final class IntBlockHash extends BlockHash {
 
     private IntVector add(IntVector vector) {
         int positions = vector.getPositionCount();
-        try (var builder = IntVector.newVectorFixedBuilder(positions, blockFactory)) {
+        try (var builder = blockFactory.newIntVectorFixedBuilder(positions)) {
             for (int i = 0; i < positions; i++) {
                 builder.appendInt(Math.toIntExact(hashOrdToGroupNullReserved(longHash.add(vector.getInt(i)))));
             }
@@ -77,7 +77,7 @@ final class IntBlockHash extends BlockHash {
     }
 
     private IntBlock add(IntBlock block) {
-        MultivalueDedupe.HashResult result = new MultivalueDedupeInt(Block.Ref.floating(block)).hash(longHash); // TODO: block factory
+        MultivalueDedupe.HashResult result = new MultivalueDedupeInt(block).hash(blockFactory, longHash);
         seenNull |= result.sawNull();
         return result.ords();
     }

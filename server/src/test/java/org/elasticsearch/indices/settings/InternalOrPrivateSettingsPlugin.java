@@ -59,14 +59,9 @@ public class InternalOrPrivateSettingsPlugin extends Plugin implements ActionPlu
         return Arrays.asList(INDEX_INTERNAL_SETTING, INDEX_PRIVATE_SETTING);
     }
 
-    public static class UpdateInternalOrPrivateAction extends ActionType<UpdateInternalOrPrivateAction.Response> {
+    public static class UpdateInternalOrPrivateAction {
 
-        public static final UpdateInternalOrPrivateAction INSTANCE = new UpdateInternalOrPrivateAction();
-        private static final String NAME = "indices:admin/settings/update-internal-or-private-index";
-
-        public UpdateInternalOrPrivateAction() {
-            super(NAME, UpdateInternalOrPrivateAction.Response::new);
-        }
+        public static final ActionType<Response> INSTANCE = new ActionType<>("indices:admin/settings/update-internal-or-private-index");
 
         public static class Request extends MasterNodeRequest<Request> {
 
@@ -130,7 +125,7 @@ public class InternalOrPrivateSettingsPlugin extends Plugin implements ActionPlu
             final IndexNameExpressionResolver indexNameExpressionResolver
         ) {
             super(
-                UpdateInternalOrPrivateAction.NAME,
+                UpdateInternalOrPrivateAction.INSTANCE.name(),
                 transportService,
                 clusterService,
                 threadPool,

@@ -10,19 +10,16 @@ package org.elasticsearch.xpack.inference.external.http;
 import org.apache.http.impl.nio.conn.PoolingNHttpClientConnectionManager;
 import org.apache.http.impl.nio.reactor.DefaultConnectingIOReactor;
 import org.apache.http.nio.reactor.IOReactorException;
+import org.elasticsearch.common.util.concurrent.DeterministicTaskQueue;
 import org.elasticsearch.core.TimeValue;
 import org.elasticsearch.test.ESTestCase;
-import org.elasticsearch.threadpool.ScalingExecutorBuilder;
 import org.elasticsearch.threadpool.Scheduler;
-import org.elasticsearch.threadpool.TestThreadPool;
 import org.elasticsearch.threadpool.ThreadPool;
-import org.junit.After;
 import org.junit.Before;
 
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
-import static org.elasticsearch.xpack.inference.InferencePlugin.UTILITY_THREAD_POOL_NAME;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.doAnswer;
@@ -34,26 +31,11 @@ import static org.mockito.Mockito.when;
 public class IdleConnectionEvictorTests extends ESTestCase {
 
     private static final TimeValue TIMEOUT = new TimeValue(30, TimeUnit.SECONDS);
-    private ThreadPool threadPool;
+    private DeterministicTaskQueue taskQueue;
 
     @Before
     public void init() {
-        threadPool = new TestThreadPool(
-            getTestName(),
-            new ScalingExecutorBuilder(
-                UTILITY_THREAD_POOL_NAME,
-                1,
-                4,
-                TimeValue.timeValueMinutes(10),
-                false,
-                "xpack.inference.utility_thread_pool"
-            )
-        );
-    }
-
-    @After
-    public void shutdown() {
-        terminate(threadPool);
+        taskQueue = new DeterministicTaskQueue();
     }
 
     public void testStart_CallsExecutorSubmit() throws IOReactorException {
@@ -61,16 +43,18 @@ public class IdleConnectionEvictorTests extends ESTestCase {
 
         when(mockThreadPool.scheduleWithFixedDelay(any(Runnable.class), any(), any())).thenReturn(mock(Scheduler.Cancellable.class));
 
-        var evictor = new IdleConnectionEvictor(
-            mockThreadPool,
-            createConnectionManager(),
-            new TimeValue(1, TimeUnit.NANOSECONDS),
-            new TimeValue(1, TimeUnit.NANOSECONDS)
-        );
+        try (
+            var evictor = new IdleConnectionEvictor(
+                mockThreadPool,
+                createConnectionManager(),
+                new TimeValue(1, TimeUnit.NANOSECONDS),
+                new TimeValue(1, TimeUnit.NANOSECONDS)
+            )
+        ) {
+            evictor.start();
 
-        evictor.start();
-
-        verify(mockThreadPool, times(1)).scheduleWithFixedDelay(any(Runnable.class), any(), any());
+            verify(mockThreadPool, times(1)).scheduleWithFixedDelay(any(Runnable.class), any(), any());
+        }
     }
 
     public void testStart_OnlyCallsSubmitOnce() throws IOReactorException {
@@ -78,24 +62,26 @@ public class IdleConnectionEvictorTests extends ESTestCase {
 
         when(mockThreadPool.scheduleWithFixedDelay(any(Runnable.class), any(), any())).thenReturn(mock(Scheduler.Cancellable.class));
 
-        var evictor = new IdleConnectionEvictor(
-            mockThreadPool,
-            createConnectionManager(),
-            new TimeValue(1, TimeUnit.NANOSECONDS),
-            new TimeValue(1, TimeUnit.NANOSECONDS)
-        );
+        try (
+            var evictor = new IdleConnectionEvictor(
+                mockThreadPool,
+                createConnectionManager(),
+                new TimeValue(1, TimeUnit.NANOSECONDS),
+                new TimeValue(1, TimeUnit.NANOSECONDS)
+            )
+        ) {
+            evictor.start();
+            evictor.start();
 
-        evictor.start();
-        evictor.start();
-
-        verify(mockThreadPool, times(1)).scheduleWithFixedDelay(any(Runnable.class), any(), any());
+            verify(mockThreadPool, times(1)).scheduleWithFixedDelay(any(Runnable.class), any(), any());
+        }
     }
 
     public void testCloseExpiredConnections_IsCalled() throws InterruptedException {
         var manager = mock(PoolingNHttpClientConnectionManager.class);
 
         var evictor = new IdleConnectionEvictor(
-            threadPool,
+            taskQueue.getThreadPool(),
             manager,
             new TimeValue(1, TimeUnit.NANOSECONDS),
             new TimeValue(1, TimeUnit.NANOSECONDS)
@@ -103,12 +89,13 @@ public class IdleConnectionEvictorTests extends ESTestCase {
 
         CountDownLatch runLatch = new CountDownLatch(1);
         doAnswer(invocation -> {
-            evictor.stop();
+            evictor.close();
             runLatch.countDown();
             return Void.TYPE;
         }).when(manager).closeExpiredConnections();
 
-        evictor.start();
+        startEvictor(evictor);
+
         runLatch.await(TIMEOUT.getSeconds(), TimeUnit.SECONDS);
 
         verify(manager, times(1)).closeExpiredConnections();
@@ -118,7 +105,7 @@ public class IdleConnectionEvictorTests extends ESTestCase {
         var manager = mock(PoolingNHttpClientConnectionManager.class);
 
         var evictor = new IdleConnectionEvictor(
-            threadPool,
+            taskQueue.getThreadPool(),
             manager,
             new TimeValue(1, TimeUnit.NANOSECONDS),
             new TimeValue(1, TimeUnit.NANOSECONDS)
@@ -126,12 +113,13 @@ public class IdleConnectionEvictorTests extends ESTestCase {
 
         CountDownLatch runLatch = new CountDownLatch(1);
         doAnswer(invocation -> {
-            evictor.stop();
+            evictor.close();
             runLatch.countDown();
             return Void.TYPE;
         }).when(manager).closeIdleConnections(anyLong(), any());
 
-        evictor.start();
+        startEvictor(evictor);
+
         runLatch.await(TIMEOUT.getSeconds(), TimeUnit.SECONDS);
 
         verify(manager, times(1)).closeIdleConnections(anyLong(), any());
@@ -139,30 +127,36 @@ public class IdleConnectionEvictorTests extends ESTestCase {
 
     public void testIsRunning_ReturnsTrue() throws IOReactorException {
         var evictor = new IdleConnectionEvictor(
-            threadPool,
+            taskQueue.getThreadPool(),
             createConnectionManager(),
             new TimeValue(1, TimeUnit.SECONDS),
             new TimeValue(1, TimeUnit.SECONDS)
         );
 
-        evictor.start();
+        startEvictor(evictor);
+
         assertTrue(evictor.isRunning());
-        evictor.stop();
+        evictor.close();
     }
 
     public void testIsRunning_ReturnsFalse() throws IOReactorException {
         var evictor = new IdleConnectionEvictor(
-            threadPool,
+            taskQueue.getThreadPool(),
             createConnectionManager(),
             new TimeValue(1, TimeUnit.SECONDS),
             new TimeValue(1, TimeUnit.SECONDS)
         );
 
-        evictor.start();
+        startEvictor(evictor);
         assertTrue(evictor.isRunning());
 
-        evictor.stop();
+        evictor.close();
         assertFalse(evictor.isRunning());
+    }
+
+    private void startEvictor(IdleConnectionEvictor evictor) {
+        taskQueue.scheduleNow(evictor::start);
+        taskQueue.runAllRunnableTasks();
     }
 
     private static PoolingNHttpClientConnectionManager createConnectionManager() throws IOReactorException {

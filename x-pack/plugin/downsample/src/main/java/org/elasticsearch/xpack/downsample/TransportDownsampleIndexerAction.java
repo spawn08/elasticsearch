@@ -52,6 +52,8 @@ public class TransportDownsampleIndexerAction extends TransportBroadcastAction<
     private final ClusterService clusterService;
     private final IndicesService indicesService;
 
+    private final DownsampleMetrics downsampleMetrics;
+
     @Inject
     public TransportDownsampleIndexerAction(
         Client client,
@@ -59,7 +61,8 @@ public class TransportDownsampleIndexerAction extends TransportBroadcastAction<
         TransportService transportService,
         IndicesService indicesService,
         ActionFilters actionFilters,
-        IndexNameExpressionResolver indexNameExpressionResolver
+        IndexNameExpressionResolver indexNameExpressionResolver,
+        DownsampleMetrics downsampleMetrics
     ) {
         super(
             DownsampleIndexerAction.NAME,
@@ -69,11 +72,12 @@ public class TransportDownsampleIndexerAction extends TransportBroadcastAction<
             indexNameExpressionResolver,
             DownsampleIndexerAction.Request::new,
             DownsampleIndexerAction.ShardDownsampleRequest::new,
-            transportService.getThreadPool().executor(Downsample.DOWSAMPLE_TASK_THREAD_POOL_NAME)
+            transportService.getThreadPool().executor(Downsample.DOWNSAMPLE_TASK_THREAD_POOL_NAME)
         );
         this.client = new OriginSettingClient(client, ClientHelper.ROLLUP_ORIGIN);
         this.clusterService = clusterService;
         this.indicesService = indicesService;
+        this.downsampleMetrics = downsampleMetrics;
     }
 
     @Override
@@ -139,11 +143,13 @@ public class TransportDownsampleIndexerAction extends TransportBroadcastAction<
             (DownsampleShardTask) task,
             client,
             indexService,
+            downsampleMetrics,
             request.shardId(),
             request.getDownsampleIndex(),
             request.getRollupConfig(),
             request.getMetricFields(),
             request.getLabelFields(),
+            request.getDimensionFields(),
             new DownsampleShardPersistentTaskState(DownsampleShardIndexerStatus.INITIALIZED, null)
         );
         return indexer.execute();

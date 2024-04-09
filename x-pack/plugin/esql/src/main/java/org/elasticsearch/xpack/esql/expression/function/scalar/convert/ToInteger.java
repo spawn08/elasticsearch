@@ -8,10 +8,10 @@
 package org.elasticsearch.xpack.esql.expression.function.scalar.convert;
 
 import org.apache.lucene.util.BytesRef;
-import org.elasticsearch.common.TriFunction;
 import org.elasticsearch.compute.ann.ConvertEvaluator;
-import org.elasticsearch.compute.operator.DriverContext;
-import org.elasticsearch.compute.operator.EvalOperator;
+import org.elasticsearch.xpack.esql.expression.function.FunctionInfo;
+import org.elasticsearch.xpack.esql.expression.function.Param;
+import org.elasticsearch.xpack.ql.InvalidArgumentException;
 import org.elasticsearch.xpack.ql.expression.Expression;
 import org.elasticsearch.xpack.ql.tree.NodeInfo;
 import org.elasticsearch.xpack.ql.tree.Source;
@@ -20,7 +20,8 @@ import org.elasticsearch.xpack.ql.type.DataType;
 import java.util.List;
 import java.util.Map;
 
-import static org.elasticsearch.xpack.ql.type.DataTypeConverter.safeDoubleToLong;
+import static org.elasticsearch.xpack.esql.type.EsqlDataTypeConverter.stringToInt;
+import static org.elasticsearch.xpack.esql.type.EsqlDataTypeConverter.unsignedLongToInt;
 import static org.elasticsearch.xpack.ql.type.DataTypeConverter.safeToInt;
 import static org.elasticsearch.xpack.ql.type.DataTypes.BOOLEAN;
 import static org.elasticsearch.xpack.ql.type.DataTypes.DATETIME;
@@ -28,37 +29,35 @@ import static org.elasticsearch.xpack.ql.type.DataTypes.DOUBLE;
 import static org.elasticsearch.xpack.ql.type.DataTypes.INTEGER;
 import static org.elasticsearch.xpack.ql.type.DataTypes.KEYWORD;
 import static org.elasticsearch.xpack.ql.type.DataTypes.LONG;
+import static org.elasticsearch.xpack.ql.type.DataTypes.TEXT;
 import static org.elasticsearch.xpack.ql.type.DataTypes.UNSIGNED_LONG;
 
 public class ToInteger extends AbstractConvertFunction {
 
-    private static final Map<
-        DataType,
-        TriFunction<EvalOperator.ExpressionEvaluator, Source, DriverContext, EvalOperator.ExpressionEvaluator>> EVALUATORS = Map.of(
-            INTEGER,
-            (fieldEval, source, driverContext) -> fieldEval,
-            BOOLEAN,
-            ToIntegerFromBooleanEvaluator::new,
-            DATETIME,
-            ToIntegerFromLongEvaluator::new,
-            KEYWORD,
-            ToIntegerFromStringEvaluator::new,
-            DOUBLE,
-            ToIntegerFromDoubleEvaluator::new,
-            UNSIGNED_LONG,
-            ToIntegerFromUnsignedLongEvaluator::new,
-            LONG,
-            ToIntegerFromLongEvaluator::new
-        );
+    private static final Map<DataType, BuildFactory> EVALUATORS = Map.ofEntries(
+        Map.entry(INTEGER, (fieldEval, source) -> fieldEval),
+        Map.entry(BOOLEAN, ToIntegerFromBooleanEvaluator.Factory::new),
+        Map.entry(DATETIME, ToIntegerFromLongEvaluator.Factory::new),
+        Map.entry(KEYWORD, ToIntegerFromStringEvaluator.Factory::new),
+        Map.entry(TEXT, ToIntegerFromStringEvaluator.Factory::new),
+        Map.entry(DOUBLE, ToIntegerFromDoubleEvaluator.Factory::new),
+        Map.entry(UNSIGNED_LONG, ToIntegerFromUnsignedLongEvaluator.Factory::new),
+        Map.entry(LONG, ToIntegerFromLongEvaluator.Factory::new)
+    );
 
-    public ToInteger(Source source, Expression field) {
+    @FunctionInfo(returnType = "integer", description = "Converts an input value to an integer value.")
+    public ToInteger(
+        Source source,
+        @Param(
+            name = "field",
+            type = { "boolean", "date", "keyword", "text", "double", "long", "unsigned_long", "integer" }
+        ) Expression field
+    ) {
         super(source, field);
     }
 
     @Override
-    protected
-        Map<DataType, TriFunction<EvalOperator.ExpressionEvaluator, Source, DriverContext, EvalOperator.ExpressionEvaluator>>
-        evaluators() {
+    protected Map<DataType, BuildFactory> factories() {
         return EVALUATORS;
     }
 
@@ -82,31 +81,22 @@ public class ToInteger extends AbstractConvertFunction {
         return bool ? 1 : 0;
     }
 
-    @ConvertEvaluator(extraName = "FromString")
+    @ConvertEvaluator(extraName = "FromString", warnExceptions = { InvalidArgumentException.class })
     static int fromKeyword(BytesRef in) {
-        String asString = in.utf8ToString();
-        try {
-            return Integer.parseInt(asString);
-        } catch (NumberFormatException nfe) {
-            try {
-                return fromDouble(Double.parseDouble(asString));
-            } catch (Exception e) {
-                throw nfe;
-            }
-        }
+        return stringToInt(in.utf8ToString());
     }
 
-    @ConvertEvaluator(extraName = "FromDouble")
+    @ConvertEvaluator(extraName = "FromDouble", warnExceptions = { InvalidArgumentException.class })
     static int fromDouble(double dbl) {
-        return fromLong(safeDoubleToLong(dbl));
+        return safeToInt(dbl);
     }
 
-    @ConvertEvaluator(extraName = "FromUnsignedLong")
-    static int fromUnsignedLong(long lng) {
-        return fromLong(ToLong.fromUnsignedLong(lng));
+    @ConvertEvaluator(extraName = "FromUnsignedLong", warnExceptions = { InvalidArgumentException.class })
+    static int fromUnsignedLong(long ul) {
+        return unsignedLongToInt(ul);
     }
 
-    @ConvertEvaluator(extraName = "FromLong")
+    @ConvertEvaluator(extraName = "FromLong", warnExceptions = { InvalidArgumentException.class })
     static int fromLong(long lng) {
         return safeToInt(lng);
     }

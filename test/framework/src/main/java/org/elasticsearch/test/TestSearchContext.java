@@ -172,11 +172,6 @@ public class TestSearchContext extends SearchContext {
     }
 
     @Override
-    public void addSearchExt(SearchExtBuilder searchExtBuilder) {
-        searchExtBuilders.put(searchExtBuilder.getWriteableName(), searchExtBuilder);
-    }
-
-    @Override
     public SearchExtBuilder getSearchExt(String name) {
         return searchExtBuilders.get(name);
     }
@@ -195,9 +190,6 @@ public class TestSearchContext extends SearchContext {
     }
 
     @Override
-    public void suggest(SuggestionSearchContext suggest) {}
-
-    @Override
     public List<RescoreContext> rescore() {
         return Collections.emptyList();
     }
@@ -214,11 +206,6 @@ public class TestSearchContext extends SearchContext {
 
     @Override
     public boolean sourceRequested() {
-        return false;
-    }
-
-    @Override
-    public boolean hasFetchSourceContext() {
         return false;
     }
 
@@ -271,9 +258,6 @@ public class TestSearchContext extends SearchContext {
     public TimeValue timeout() {
         return TimeValue.ZERO;
     }
-
-    @Override
-    public void timeout(TimeValue timeout) {}
 
     @Override
     public int terminateAfter() {
@@ -343,11 +327,6 @@ public class TestSearchContext extends SearchContext {
     @Override
     public FieldDoc searchAfter() {
         return searchAfter;
-    }
-
-    @Override
-    public SearchContext collapse(CollapseContext collapse) {
-        return null;
     }
 
     @Override
@@ -437,9 +416,6 @@ public class TestSearchContext extends SearchContext {
     }
 
     @Override
-    public void groupStats(List<String> groupStats) {}
-
-    @Override
     public boolean version() {
         return false;
     }
@@ -455,16 +431,6 @@ public class TestSearchContext extends SearchContext {
     @Override
     public void seqNoAndPrimaryTerm(boolean seqNoAndPrimaryTerm) {
 
-    }
-
-    @Override
-    public int[] docIdsToLoad() {
-        return new int[0];
-    }
-
-    @Override
-    public SearchContext docIdsToLoad(int[] docIdsToLoad) {
-        return null;
     }
 
     @Override

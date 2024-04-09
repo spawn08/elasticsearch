@@ -13,7 +13,7 @@ import org.elasticsearch.action.support.ThreadedActionListener;
 import org.elasticsearch.client.internal.node.NodeClient;
 import org.elasticsearch.rest.BaseRestHandler;
 import org.elasticsearch.rest.RestRequest;
-import org.elasticsearch.rest.action.RestChunkedToXContentListener;
+import org.elasticsearch.rest.action.RestRefCountedChunkedToXContentListener;
 import org.elasticsearch.xpack.ccr.Ccr;
 import org.elasticsearch.xpack.core.ccr.action.CcrStatsAction;
 
@@ -38,12 +38,16 @@ public class RestCcrStatsAction extends BaseRestHandler {
     @Override
     protected RestChannelConsumer prepareRequest(final RestRequest restRequest, final NodeClient client) {
         final CcrStatsAction.Request request = new CcrStatsAction.Request();
+        if (restRequest.hasParam("timeout")) {
+            request.setTimeout(restRequest.paramAsTime("timeout", null));
+        }
+        request.masterNodeTimeout(restRequest.paramAsTime("master_timeout", request.masterNodeTimeout()));
         return channel -> client.execute(
             CcrStatsAction.INSTANCE,
             request,
             new ThreadedActionListener<>(
                 client.threadPool().executor(Ccr.CCR_THREAD_POOL_NAME),
-                new RestChunkedToXContentListener<>(channel)
+                new RestRefCountedChunkedToXContentListener<>(channel)
             )
         );
     }

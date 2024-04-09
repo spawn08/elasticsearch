@@ -59,11 +59,13 @@ public class RankSearchContext extends SearchContext {
     private final int windowSize;
     private final QuerySearchResult querySearchResult;
 
+    @SuppressWarnings("this-escape")
     public RankSearchContext(SearchContext parent, Query rankQuery, int windowSize) {
         this.parent = parent;
         this.rankQuery = parent.buildFilteredQuery(rankQuery);
         this.windowSize = windowSize;
         this.querySearchResult = new QuerySearchResult(parent.readerContext().id(), parent.shardTarget(), parent.request());
+        this.addReleasable(querySearchResult::decRef);
     }
 
     @Override
@@ -256,11 +258,6 @@ public class RankSearchContext extends SearchContext {
     }
 
     @Override
-    public void addSearchExt(SearchExtBuilder searchExtBuilder) {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
     public SearchExtBuilder getSearchExt(String name) {
         throw new UnsupportedOperationException();
     }
@@ -282,11 +279,6 @@ public class RankSearchContext extends SearchContext {
 
     @Override
     public SuggestionSearchContext suggest() {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public void suggest(SuggestionSearchContext suggest) {
         throw new UnsupportedOperationException();
     }
 
@@ -317,11 +309,6 @@ public class RankSearchContext extends SearchContext {
 
     @Override
     public boolean sourceRequested() {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public boolean hasFetchSourceContext() {
         throw new UnsupportedOperationException();
     }
 
@@ -361,11 +348,6 @@ public class RankSearchContext extends SearchContext {
     }
 
     @Override
-    public void timeout(TimeValue timeout) {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
     public void terminateAfter(int terminateAfter) {
         throw new UnsupportedOperationException();
     }
@@ -397,11 +379,6 @@ public class RankSearchContext extends SearchContext {
 
     @Override
     public SearchContext searchAfter(FieldDoc searchAfter) {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public SearchContext collapse(CollapseContext collapse) {
         throw new UnsupportedOperationException();
     }
 
@@ -461,11 +438,6 @@ public class RankSearchContext extends SearchContext {
     }
 
     @Override
-    public void groupStats(List<String> groupStats) {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
     public boolean version() {
         throw new UnsupportedOperationException();
     }
@@ -482,16 +454,6 @@ public class RankSearchContext extends SearchContext {
 
     @Override
     public void seqNoAndPrimaryTerm(boolean seqNoAndPrimaryTerm) {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public int[] docIdsToLoad() {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public SearchContext docIdsToLoad(int[] docIdsToLoad) {
         throw new UnsupportedOperationException();
     }
 

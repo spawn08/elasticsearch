@@ -77,13 +77,6 @@ public abstract class AbstractScalarFunctionTestCase extends AbstractFunctionTes
     }
 
     /**
-     * All string types (keyword, text, match_only_text, etc). For passing to {@link #required} or {@link #optional}.
-     */
-    protected static DataType[] strings() {
-        return EsqlDataTypes.types().stream().filter(DataTypes::isString).toArray(DataType[]::new);
-    }
-
-    /**
      * All integer types (long, int, short, byte). For passing to {@link #required} or {@link #optional}.
      */
     protected static DataType[] integers() {
@@ -107,10 +100,6 @@ public abstract class AbstractScalarFunctionTestCase extends AbstractFunctionTes
     protected final DataType[] representableNumerics() {
         // TODO numeric should only include representable numbers but that is a change for a followup
         return EsqlDataTypes.types().stream().filter(DataType::isNumeric).filter(EsqlDataTypes::isRepresentable).toArray(DataType[]::new);
-    }
-
-    protected final DataType[] representable() {
-        return EsqlDataTypes.types().stream().filter(EsqlDataTypes::isRepresentable).toArray(DataType[]::new);
     }
 
     protected record ArgumentSpec(boolean optional, Set<DataType> validTypes) {}
@@ -176,7 +165,7 @@ public abstract class AbstractScalarFunctionTestCase extends AbstractFunctionTes
         if (withoutNull.equals(Arrays.asList(strings()))) {
             return "string";
         }
-        if (withoutNull.equals(Arrays.asList(integers()))) {
+        if (withoutNull.equals(Arrays.asList(integers())) || withoutNull.equals(List.of(DataTypes.INTEGER))) {
             return "integer";
         }
         if (withoutNull.equals(Arrays.asList(rationals()))) {
@@ -188,14 +177,20 @@ public abstract class AbstractScalarFunctionTestCase extends AbstractFunctionTes
         if (withoutNull.equals(List.of(DataTypes.DATETIME))) {
             return "datetime";
         }
+        if (withoutNull.equals(List.of(DataTypes.IP))) {
+            return "ip";
+        }
         List<DataType> negations = Stream.concat(Stream.of(numerics()), Stream.of(EsqlDataTypes.DATE_PERIOD, EsqlDataTypes.TIME_DURATION))
             .sorted(Comparator.comparing(DataType::name))
             .toList();
         if (withoutNull.equals(negations)) {
             return "numeric, date_period or time_duration";
         }
-        if (validTypes.equals(Set.copyOf(Arrays.asList(representable())))) {
+        if (validTypes.equals(Set.copyOf(Arrays.asList(representableTypes())))) {
             return "representable";
+        }
+        if (validTypes.equals(Set.copyOf(Arrays.asList(representableNonSpatialTypes())))) {
+            return "representableNonSpatial";
         }
         throw new IllegalArgumentException("can't guess expected type for " + validTypes);
     }

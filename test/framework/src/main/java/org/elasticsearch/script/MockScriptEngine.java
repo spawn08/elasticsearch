@@ -377,13 +377,27 @@ public class MockScriptEngine implements ScriptEngine {
                 }
             };
             return context.factoryClazz.cast(objectFieldScript);
+        } else if (context.instanceClazz.equals(GeometryFieldScript.class)) {
+            GeometryFieldScript.Factory geometryFieldScript = (f, p, s, onScriptError) -> ctx -> new GeometryFieldScript(
+                f,
+                p,
+                s,
+                OnScriptError.FAIL,
+                ctx
+            ) {
+                @Override
+                public void execute() {
+                    emitFromObject("POINT(1.2 1.2)");
+                }
+            };
+            return context.factoryClazz.cast(geometryFieldScript);
         } else if (context.instanceClazz.equals(DoubleValuesScript.class)) {
             DoubleValuesScript.Factory doubleValuesScript = () -> new MockDoubleValuesScript();
             return context.factoryClazz.cast(doubleValuesScript);
         }
         ContextCompiler compiler = contexts.get(context);
         if (compiler != null) {
-            return context.factoryClazz.cast(compiler.compile(script::apply, params));
+            return context.factoryClazz.cast(compiler.compile(script, params));
         }
         throw new IllegalArgumentException("mock script engine does not know how to handle context [" + context.name + "]");
     }

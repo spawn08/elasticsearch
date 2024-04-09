@@ -341,6 +341,42 @@ public class EsqlBaseParserBaseListener implements EsqlBaseParserListener {
    *
    * <p>The default implementation does nothing.</p>
    */
+  @Override public void enterFromIdentifier(EsqlBaseParser.FromIdentifierContext ctx) { }
+  /**
+   * {@inheritDoc}
+   *
+   * <p>The default implementation does nothing.</p>
+   */
+  @Override public void exitFromIdentifier(EsqlBaseParser.FromIdentifierContext ctx) { }
+  /**
+   * {@inheritDoc}
+   *
+   * <p>The default implementation does nothing.</p>
+   */
+  @Override public void enterFromOptions(EsqlBaseParser.FromOptionsContext ctx) { }
+  /**
+   * {@inheritDoc}
+   *
+   * <p>The default implementation does nothing.</p>
+   */
+  @Override public void exitFromOptions(EsqlBaseParser.FromOptionsContext ctx) { }
+  /**
+   * {@inheritDoc}
+   *
+   * <p>The default implementation does nothing.</p>
+   */
+  @Override public void enterConfigOption(EsqlBaseParser.ConfigOptionContext ctx) { }
+  /**
+   * {@inheritDoc}
+   *
+   * <p>The default implementation does nothing.</p>
+   */
+  @Override public void exitConfigOption(EsqlBaseParser.ConfigOptionContext ctx) { }
+  /**
+   * {@inheritDoc}
+   *
+   * <p>The default implementation does nothing.</p>
+   */
   @Override public void enterMetadata(EsqlBaseParser.MetadataContext ctx) { }
   /**
    * {@inheritDoc}
@@ -348,6 +384,30 @@ public class EsqlBaseParserBaseListener implements EsqlBaseParserListener {
    * <p>The default implementation does nothing.</p>
    */
   @Override public void exitMetadata(EsqlBaseParser.MetadataContext ctx) { }
+  /**
+   * {@inheritDoc}
+   *
+   * <p>The default implementation does nothing.</p>
+   */
+  @Override public void enterMetadataOption(EsqlBaseParser.MetadataOptionContext ctx) { }
+  /**
+   * {@inheritDoc}
+   *
+   * <p>The default implementation does nothing.</p>
+   */
+  @Override public void exitMetadataOption(EsqlBaseParser.MetadataOptionContext ctx) { }
+  /**
+   * {@inheritDoc}
+   *
+   * <p>The default implementation does nothing.</p>
+   */
+  @Override public void enterDeprecated_metadata(EsqlBaseParser.Deprecated_metadataContext ctx) { }
+  /**
+   * {@inheritDoc}
+   *
+   * <p>The default implementation does nothing.</p>
+   */
+  @Override public void exitDeprecated_metadata(EsqlBaseParser.Deprecated_metadataContext ctx) { }
   /**
    * {@inheritDoc}
    *
@@ -389,30 +449,6 @@ public class EsqlBaseParserBaseListener implements EsqlBaseParserListener {
    *
    * <p>The default implementation does nothing.</p>
    */
-  @Override public void enterGrouping(EsqlBaseParser.GroupingContext ctx) { }
-  /**
-   * {@inheritDoc}
-   *
-   * <p>The default implementation does nothing.</p>
-   */
-  @Override public void exitGrouping(EsqlBaseParser.GroupingContext ctx) { }
-  /**
-   * {@inheritDoc}
-   *
-   * <p>The default implementation does nothing.</p>
-   */
-  @Override public void enterSourceIdentifier(EsqlBaseParser.SourceIdentifierContext ctx) { }
-  /**
-   * {@inheritDoc}
-   *
-   * <p>The default implementation does nothing.</p>
-   */
-  @Override public void exitSourceIdentifier(EsqlBaseParser.SourceIdentifierContext ctx) { }
-  /**
-   * {@inheritDoc}
-   *
-   * <p>The default implementation does nothing.</p>
-   */
   @Override public void enterQualifiedName(EsqlBaseParser.QualifiedNameContext ctx) { }
   /**
    * {@inheritDoc}
@@ -425,6 +461,18 @@ public class EsqlBaseParserBaseListener implements EsqlBaseParserListener {
    *
    * <p>The default implementation does nothing.</p>
    */
+  @Override public void enterQualifiedNamePattern(EsqlBaseParser.QualifiedNamePatternContext ctx) { }
+  /**
+   * {@inheritDoc}
+   *
+   * <p>The default implementation does nothing.</p>
+   */
+  @Override public void exitQualifiedNamePattern(EsqlBaseParser.QualifiedNamePatternContext ctx) { }
+  /**
+   * {@inheritDoc}
+   *
+   * <p>The default implementation does nothing.</p>
+   */
   @Override public void enterIdentifier(EsqlBaseParser.IdentifierContext ctx) { }
   /**
    * {@inheritDoc}
@@ -432,6 +480,18 @@ public class EsqlBaseParserBaseListener implements EsqlBaseParserListener {
    * <p>The default implementation does nothing.</p>
    */
   @Override public void exitIdentifier(EsqlBaseParser.IdentifierContext ctx) { }
+  /**
+   * {@inheritDoc}
+   *
+   * <p>The default implementation does nothing.</p>
+   */
+  @Override public void enterIdentifierPattern(EsqlBaseParser.IdentifierPatternContext ctx) { }
+  /**
+   * {@inheritDoc}
+   *
+   * <p>The default implementation does nothing.</p>
+   */
+  @Override public void exitIdentifierPattern(EsqlBaseParser.IdentifierPatternContext ctx) { }
   /**
    * {@inheritDoc}
    *
@@ -809,13 +869,13 @@ public class EsqlBaseParserBaseListener implements EsqlBaseParserListener {
    *
    * <p>The default implementation does nothing.</p>
    */
-  @Override public void enterShowFunctions(EsqlBaseParser.ShowFunctionsContext ctx) { }
+  @Override public void enterMetaFunctions(EsqlBaseParser.MetaFunctionsContext ctx) { }
   /**
    * {@inheritDoc}
    *
    * <p>The default implementation does nothing.</p>
    */
-  @Override public void exitShowFunctions(EsqlBaseParser.ShowFunctionsContext ctx) { }
+  @Override public void exitMetaFunctions(EsqlBaseParser.MetaFunctionsContext ctx) { }
   /**
    * {@inheritDoc}
    *

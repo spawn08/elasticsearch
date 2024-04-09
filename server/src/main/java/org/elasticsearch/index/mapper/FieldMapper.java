@@ -22,6 +22,7 @@ import org.elasticsearch.common.util.CollectionUtils;
 import org.elasticsearch.common.util.Maps;
 import org.elasticsearch.common.xcontent.support.XContentMapValues;
 import org.elasticsearch.index.IndexVersion;
+import org.elasticsearch.index.IndexVersions;
 import org.elasticsearch.index.analysis.NamedAnalyzer;
 import org.elasticsearch.script.Script;
 import org.elasticsearch.script.ScriptType;
@@ -50,10 +51,11 @@ import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
+import java.util.stream.Stream;
 
 import static org.elasticsearch.core.Strings.format;
 
-public abstract class FieldMapper extends Mapper implements Cloneable {
+public abstract class FieldMapper extends Mapper {
     private static final Logger logger = LogManager.getLogger(FieldMapper.class);
 
     public static final Setting<Boolean> IGNORE_MALFORMED_SETTING = Setting.boolSetting(
@@ -371,7 +373,7 @@ public abstract class FieldMapper extends Mapper implements Cloneable {
     public abstract Builder getMergeBuilder();
 
     @Override
-    public final FieldMapper merge(Mapper mergeWith, MapperBuilderContext mapperBuilderContext) {
+    public final FieldMapper merge(Mapper mergeWith, MapperMergeContext mapperMergeContext) {
         if (mergeWith == this) {
             return this;
         }
@@ -393,9 +395,9 @@ public abstract class FieldMapper extends Mapper implements Cloneable {
             return (FieldMapper) mergeWith;
         }
         Conflicts conflicts = new Conflicts(name());
-        builder.merge((FieldMapper) mergeWith, conflicts, mapperBuilderContext);
+        builder.merge((FieldMapper) mergeWith, conflicts, mapperMergeContext);
         conflicts.check();
-        return builder.build(mapperBuilderContext);
+        return builder.build(mapperMergeContext.getMapperBuilderContext());
     }
 
     protected void checkIncomingMergeType(FieldMapper mergeWith) {
@@ -427,6 +429,11 @@ public abstract class FieldMapper extends Mapper implements Cloneable {
 
     protected abstract String contentType();
 
+    @Override
+    public int getTotalFieldsCount() {
+        return 1 + Stream.of(multiFields.mappers).mapToInt(FieldMapper::getTotalFieldsCount).sum();
+    }
+
     public Map<String, NamedAnalyzer> indexAnalyzers() {
         return Map.of();
     }
@@ -443,28 +450,47 @@ public abstract class FieldMapper extends Mapper implements Cloneable {
 
             private final Map<String, Function<MapperBuilderContext, FieldMapper>> mapperBuilders = new HashMap<>();
 
+            private boolean hasSyntheticSourceCompatibleKeywordField;
+
             public Builder add(FieldMapper.Builder builder) {
                 mapperBuilders.put(builder.name(), builder::build);
+
+                if (builder instanceof KeywordFieldMapper.Builder kwd) {
+                    if (kwd.hasNormalizer() == false && (kwd.hasDocValues() || kwd.isStored())) {
+                        hasSyntheticSourceCompatibleKeywordField = true;
+                    }
+                }
+
                 return this;
             }
 
-            public Builder add(FieldMapper mapper) {
+            private void add(FieldMapper mapper) {
                 mapperBuilders.put(mapper.simpleName(), context -> mapper);
-                return this;
+
+                if (mapper instanceof KeywordFieldMapper kwd) {
+                    if (kwd.hasNormalizer() == false && (kwd.fieldType().hasDocValues() || kwd.fieldType().isStored())) {
+                        hasSyntheticSourceCompatibleKeywordField = true;
+                    }
+                }
             }
 
-            public Builder update(FieldMapper toMerge, MapperBuilderContext context) {
+            private void update(FieldMapper toMerge, MapperMergeContext context) {
                 if (mapperBuilders.containsKey(toMerge.simpleName()) == false) {
-                    add(toMerge);
+                    if (context.decrementFieldBudgetIfPossible(toMerge.getTotalFieldsCount())) {
+                        add(toMerge);
+                    }
                 } else {
-                    FieldMapper existing = mapperBuilders.get(toMerge.simpleName()).apply(context);
+                    FieldMapper existing = mapperBuilders.get(toMerge.simpleName()).apply(context.getMapperBuilderContext());
                     add(existing.merge(toMerge, context));
                 }
-                return this;
             }
 
             public boolean hasMultiFields() {
                 return mapperBuilders.isEmpty() == false;
+            }
+
+            public boolean hasSyntheticSourceCompatibleKeywordField() {
+                return hasSyntheticSourceCompatibleKeywordField;
             }
 
             public MultiFields build(Mapper.Builder mainFieldBuilder, MapperBuilderContext context) {
@@ -472,7 +498,7 @@ public abstract class FieldMapper extends Mapper implements Cloneable {
                     return empty();
                 } else {
                     FieldMapper[] mappers = new FieldMapper[mapperBuilders.size()];
-                    context = context.createChildContext(mainFieldBuilder.name());
+                    context = context.createChildContext(mainFieldBuilder.name(), null);
                     int i = 0;
                     for (Map.Entry<String, Function<MapperBuilderContext, FieldMapper>> entry : this.mapperBuilders.entrySet()) {
                         mappers[i++] = entry.getValue().apply(context);
@@ -1127,6 +1153,10 @@ public abstract class FieldMapper extends Mapper implements Cloneable {
             return Parameter.boolParam("store", false, initializer, defaultValue);
         }
 
+        public static Parameter<Boolean> storeParam(Function<FieldMapper, Boolean> initializer, Supplier<Boolean> defaultValue) {
+            return Parameter.boolParam("store", false, initializer, defaultValue);
+        }
+
         public static Parameter<Boolean> docValuesParam(Function<FieldMapper, Boolean> initializer, boolean defaultValue) {
             return Parameter.boolParam("doc_values", false, initializer, defaultValue);
         }
@@ -1219,11 +1249,11 @@ public abstract class FieldMapper extends Mapper implements Cloneable {
             return this;
         }
 
-        protected void merge(FieldMapper in, Conflicts conflicts, MapperBuilderContext mapperBuilderContext) {
+        protected void merge(FieldMapper in, Conflicts conflicts, MapperMergeContext mapperMergeContext) {
             for (Parameter<?> param : getParameters()) {
                 param.merge(in, conflicts);
             }
-            MapperBuilderContext childContext = mapperBuilderContext.createChildContext(in.simpleName());
+            MapperMergeContext childContext = mapperMergeContext.createChildContext(in.simpleName(), null);
             for (FieldMapper newSubField : in.multiFields.mappers) {
                 multiFieldsBuilder.update(newSubField, childContext);
             }
@@ -1310,7 +1340,7 @@ public abstract class FieldMapper extends Mapper implements Cloneable {
                         continue;
                     }
                     case "boost" -> {
-                        if (parserContext.indexVersionCreated().onOrAfter(IndexVersion.V_8_0_0)) {
+                        if (parserContext.indexVersionCreated().onOrAfter(IndexVersions.V_8_0_0)) {
                             throw new MapperParsingException("Unknown parameter [boost] on mapper [" + name + "]");
                         }
                         deprecationLogger.warn(
@@ -1354,7 +1384,7 @@ public abstract class FieldMapper extends Mapper implements Cloneable {
                         iterator.remove();
                         continue;
                     }
-                    if (parserContext.isFromDynamicTemplate() && parserContext.indexVersionCreated().before(IndexVersion.V_8_0_0)) {
+                    if (parserContext.isFromDynamicTemplate() && parserContext.indexVersionCreated().before(IndexVersions.V_8_0_0)) {
                         // The parameter is unknown, but this mapping is from a dynamic template.
                         // Until 7.x it was possible to use unknown parameters there, so for bwc we need to ignore it
                         deprecationLogger.warn(
@@ -1401,10 +1431,30 @@ public abstract class FieldMapper extends Mapper implements Cloneable {
         private static final Set<String> DEPRECATED_PARAMS = Set.of("store", "meta", "index", "doc_values", "index_options", "similarity");
 
         private static boolean isDeprecatedParameter(String propName, IndexVersion indexCreatedVersion) {
-            if (indexCreatedVersion.onOrAfter(IndexVersion.V_8_0_0)) {
+            if (indexCreatedVersion.onOrAfter(IndexVersions.V_8_0_0)) {
                 return false;
             }
             return DEPRECATED_PARAMS.contains(propName);
+        }
+    }
+
+    /**
+     * Creates mappers for fields that can act as time-series dimensions.
+     */
+    public abstract static class DimensionBuilder extends Builder {
+
+        private boolean inheritDimensionParameterFromParentObject = false;
+
+        public DimensionBuilder(String name) {
+            super(name);
+        }
+
+        void setInheritDimensionParameterFromParentObject() {
+            this.inheritDimensionParameterFromParentObject = true;
+        }
+
+        protected boolean inheritDimensionParameterFromParentObject(MapperBuilderContext context) {
+            return inheritDimensionParameterFromParentObject || context.parentObjectContainsDimensions();
         }
     }
 
@@ -1430,7 +1480,7 @@ public abstract class FieldMapper extends Mapper implements Cloneable {
          * @param builderFunction a function that produces a Builder from a name and parsercontext
          */
         public TypeParser(BiFunction<String, MappingParserContext, Builder> builderFunction) {
-            this(builderFunction, (n, c) -> {}, IndexVersion.MINIMUM_COMPATIBLE);
+            this(builderFunction, (n, c) -> {}, IndexVersions.MINIMUM_COMPATIBLE);
         }
 
         /**
@@ -1445,7 +1495,7 @@ public abstract class FieldMapper extends Mapper implements Cloneable {
             BiFunction<String, MappingParserContext, Builder> builderFunction,
             BiConsumer<String, MappingParserContext> contextValidator
         ) {
-            this(builderFunction, contextValidator, IndexVersion.MINIMUM_COMPATIBLE);
+            this(builderFunction, contextValidator, IndexVersions.MINIMUM_COMPATIBLE);
         }
 
         private TypeParser(

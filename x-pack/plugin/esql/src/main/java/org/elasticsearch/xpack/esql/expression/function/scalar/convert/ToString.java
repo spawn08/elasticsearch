@@ -8,22 +8,28 @@
 package org.elasticsearch.xpack.esql.expression.function.scalar.convert;
 
 import org.apache.lucene.util.BytesRef;
-import org.elasticsearch.common.TriFunction;
 import org.elasticsearch.compute.ann.ConvertEvaluator;
-import org.elasticsearch.compute.operator.DriverContext;
-import org.elasticsearch.compute.operator.EvalOperator;
-import org.elasticsearch.search.DocValueFormat;
 import org.elasticsearch.xpack.esql.evaluator.mapper.EvaluatorMapper;
+import org.elasticsearch.xpack.esql.expression.function.FunctionInfo;
 import org.elasticsearch.xpack.esql.expression.function.Param;
 import org.elasticsearch.xpack.ql.expression.Expression;
 import org.elasticsearch.xpack.ql.tree.NodeInfo;
 import org.elasticsearch.xpack.ql.tree.Source;
 import org.elasticsearch.xpack.ql.type.DataType;
-import org.elasticsearch.xpack.versionfield.Version;
 
 import java.util.List;
 import java.util.Map;
 
+import static org.elasticsearch.xpack.esql.type.EsqlDataTypeConverter.dateTimeToString;
+import static org.elasticsearch.xpack.esql.type.EsqlDataTypeConverter.ipToString;
+import static org.elasticsearch.xpack.esql.type.EsqlDataTypeConverter.numericBooleanToString;
+import static org.elasticsearch.xpack.esql.type.EsqlDataTypeConverter.spatialToString;
+import static org.elasticsearch.xpack.esql.type.EsqlDataTypeConverter.unsignedLongToString;
+import static org.elasticsearch.xpack.esql.type.EsqlDataTypeConverter.versionToString;
+import static org.elasticsearch.xpack.esql.type.EsqlDataTypes.CARTESIAN_POINT;
+import static org.elasticsearch.xpack.esql.type.EsqlDataTypes.CARTESIAN_SHAPE;
+import static org.elasticsearch.xpack.esql.type.EsqlDataTypes.GEO_POINT;
+import static org.elasticsearch.xpack.esql.type.EsqlDataTypes.GEO_SHAPE;
 import static org.elasticsearch.xpack.ql.type.DataTypes.BOOLEAN;
 import static org.elasticsearch.xpack.ql.type.DataTypes.DATETIME;
 import static org.elasticsearch.xpack.ql.type.DataTypes.DOUBLE;
@@ -34,50 +40,53 @@ import static org.elasticsearch.xpack.ql.type.DataTypes.LONG;
 import static org.elasticsearch.xpack.ql.type.DataTypes.TEXT;
 import static org.elasticsearch.xpack.ql.type.DataTypes.UNSIGNED_LONG;
 import static org.elasticsearch.xpack.ql.type.DataTypes.VERSION;
-import static org.elasticsearch.xpack.ql.util.DateUtils.UTC_DATE_TIME_FORMATTER;
-import static org.elasticsearch.xpack.ql.util.NumericUtils.unsignedLongAsNumber;
 
 public class ToString extends AbstractConvertFunction implements EvaluatorMapper {
 
-    private static final Map<
-        DataType,
-        TriFunction<EvalOperator.ExpressionEvaluator, Source, DriverContext, EvalOperator.ExpressionEvaluator>> EVALUATORS = Map.of(
-            KEYWORD,
-            (fieldEval, source, driverContext) -> fieldEval,
-            BOOLEAN,
-            ToStringFromBooleanEvaluator::new,
-            DATETIME,
-            ToStringFromDatetimeEvaluator::new,
-            IP,
-            ToStringFromIPEvaluator::new,
-            DOUBLE,
-            ToStringFromDoubleEvaluator::new,
-            LONG,
-            ToStringFromLongEvaluator::new,
-            INTEGER,
-            ToStringFromIntEvaluator::new,
-            TEXT,
-            (fieldEval, source, driverContext) -> fieldEval,
-            VERSION,
-            ToStringFromVersionEvaluator::new,
-            UNSIGNED_LONG,
-            ToStringFromUnsignedLongEvaluator::new
-        );
+    private static final Map<DataType, BuildFactory> EVALUATORS = Map.ofEntries(
+        Map.entry(KEYWORD, (fieldEval, source) -> fieldEval),
+        Map.entry(BOOLEAN, ToStringFromBooleanEvaluator.Factory::new),
+        Map.entry(DATETIME, ToStringFromDatetimeEvaluator.Factory::new),
+        Map.entry(IP, ToStringFromIPEvaluator.Factory::new),
+        Map.entry(DOUBLE, ToStringFromDoubleEvaluator.Factory::new),
+        Map.entry(LONG, ToStringFromLongEvaluator.Factory::new),
+        Map.entry(INTEGER, ToStringFromIntEvaluator.Factory::new),
+        Map.entry(TEXT, (fieldEval, source) -> fieldEval),
+        Map.entry(VERSION, ToStringFromVersionEvaluator.Factory::new),
+        Map.entry(UNSIGNED_LONG, ToStringFromUnsignedLongEvaluator.Factory::new),
+        Map.entry(GEO_POINT, ToStringFromGeoPointEvaluator.Factory::new),
+        Map.entry(CARTESIAN_POINT, ToStringFromCartesianPointEvaluator.Factory::new),
+        Map.entry(CARTESIAN_SHAPE, ToStringFromCartesianShapeEvaluator.Factory::new),
+        Map.entry(GEO_SHAPE, ToStringFromGeoShapeEvaluator.Factory::new)
+    );
 
+    @FunctionInfo(returnType = "keyword", description = "Converts a field into a string.")
     public ToString(
         Source source,
         @Param(
-            name = "v",
-            type = { "unsigned_long", "date", "boolean", "double", "ip", "text", "integer", "keyword", "version", "long" }
+            name = "field",
+            type = {
+                "boolean",
+                "cartesian_point",
+                "cartesian_shape",
+                "date",
+                "double",
+                "geo_point",
+                "geo_shape",
+                "integer",
+                "ip",
+                "keyword",
+                "long",
+                "text",
+                "unsigned_long",
+                "version" }
         ) Expression v
     ) {
         super(source, v);
     }
 
     @Override
-    protected
-        Map<DataType, TriFunction<EvalOperator.ExpressionEvaluator, Source, DriverContext, EvalOperator.ExpressionEvaluator>>
-        evaluators() {
+    protected Map<DataType, BuildFactory> factories() {
         return EVALUATORS;
     }
 
@@ -98,41 +107,61 @@ public class ToString extends AbstractConvertFunction implements EvaluatorMapper
 
     @ConvertEvaluator(extraName = "FromBoolean")
     static BytesRef fromBoolean(boolean bool) {
-        return new BytesRef(String.valueOf(bool));
+        return numericBooleanToString(bool);
     }
 
     @ConvertEvaluator(extraName = "FromIP")
     static BytesRef fromIP(BytesRef ip) {
-        return new BytesRef(DocValueFormat.IP.format(ip));
+        return new BytesRef(ipToString(ip));
     }
 
     @ConvertEvaluator(extraName = "FromDatetime")
     static BytesRef fromDatetime(long datetime) {
-        return new BytesRef(UTC_DATE_TIME_FORMATTER.formatMillis(datetime));
+        return new BytesRef(dateTimeToString(datetime));
     }
 
     @ConvertEvaluator(extraName = "FromDouble")
     static BytesRef fromDouble(double dbl) {
-        return new BytesRef(String.valueOf(dbl));
+        return numericBooleanToString(dbl);
     }
 
     @ConvertEvaluator(extraName = "FromLong")
     static BytesRef fromDouble(long lng) {
-        return new BytesRef(String.valueOf(lng));
+        return numericBooleanToString(lng);
     }
 
     @ConvertEvaluator(extraName = "FromInt")
     static BytesRef fromDouble(int integer) {
-        return new BytesRef(String.valueOf(integer));
+        return numericBooleanToString(integer);
     }
 
     @ConvertEvaluator(extraName = "FromVersion")
     static BytesRef fromVersion(BytesRef version) {
-        return new BytesRef(new Version(version).toString());
+        return new BytesRef(versionToString(version));
     }
 
     @ConvertEvaluator(extraName = "FromUnsignedLong")
     static BytesRef fromUnsignedLong(long lng) {
-        return new BytesRef(unsignedLongAsNumber(lng).toString());
+        return unsignedLongToString(lng);
+    }
+
+    @ConvertEvaluator(extraName = "FromGeoPoint")
+    static BytesRef fromGeoPoint(BytesRef wkb) {
+        return new BytesRef(spatialToString(wkb));
+    }
+
+    @ConvertEvaluator(extraName = "FromCartesianPoint")
+    static BytesRef fromCartesianPoint(BytesRef wkb) {
+        return new BytesRef(spatialToString(wkb));
+    }
+
+    @ConvertEvaluator(extraName = "FromCartesianShape")
+    static BytesRef fromCartesianShape(BytesRef wkb) {
+        return new BytesRef(spatialToString(wkb));
+    }
+
+    @ConvertEvaluator(extraName = "FromGeoShape")
+    static BytesRef fromGeoShape(BytesRef wkb) {
+        return new BytesRef(spatialToString(wkb));
     }
 }

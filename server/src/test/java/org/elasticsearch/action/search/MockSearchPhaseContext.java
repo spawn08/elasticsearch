@@ -13,11 +13,10 @@ import org.elasticsearch.action.OriginalIndices;
 import org.elasticsearch.common.util.concurrent.AtomicArray;
 import org.elasticsearch.core.Nullable;
 import org.elasticsearch.core.Releasable;
+import org.elasticsearch.core.Releasables;
 import org.elasticsearch.search.SearchPhaseResult;
 import org.elasticsearch.search.SearchShardTarget;
-import org.elasticsearch.search.internal.InternalSearchResponse;
 import org.elasticsearch.search.internal.ShardSearchContextId;
-import org.elasticsearch.search.internal.ShardSearchRequest;
 import org.elasticsearch.transport.Transport;
 import org.junit.Assert;
 
@@ -42,6 +41,8 @@ public final class MockSearchPhaseContext implements SearchPhaseContext {
     final Set<ShardSearchContextId> releasedSearchContexts = new HashSet<>();
     final SearchRequest searchRequest = new SearchRequest();
     final AtomicReference<SearchResponse> searchResponse = new AtomicReference<>();
+
+    private final List<Releasable> releasables = new ArrayList<>();
 
     public MockSearchPhaseContext(int numShards) {
         this.numShards = numShards;
@@ -80,10 +81,10 @@ public final class MockSearchPhaseContext implements SearchPhaseContext {
     }
 
     @Override
-    public void sendSearchResponse(InternalSearchResponse internalSearchResponse, AtomicArray<SearchPhaseResult> queryResults) {
+    public void sendSearchResponse(SearchResponseSections internalSearchResponse, AtomicArray<SearchPhaseResult> queryResults) {
         String scrollId = getRequest().scroll() != null ? TransportSearchHelper.buildScrollId(queryResults) : null;
         String searchContextId = getRequest().pointInTimeBuilder() != null ? TransportSearchHelper.buildScrollId(queryResults) : null;
-        searchResponse.set(
+        var existing = searchResponse.getAndSet(
             new SearchResponse(
                 internalSearchResponse,
                 scrollId,
@@ -96,6 +97,11 @@ public final class MockSearchPhaseContext implements SearchPhaseContext {
                 searchContextId
             )
         );
+        Releasables.close(releasables);
+        releasables.clear();
+        if (existing != null) {
+            existing.decRef();
+        }
     }
 
     @Override
@@ -121,12 +127,6 @@ public final class MockSearchPhaseContext implements SearchPhaseContext {
     }
 
     @Override
-    public ShardSearchRequest buildShardSearchRequest(SearchShardIterator shardIt, int shardIndex) {
-        Assert.fail("should not be called");
-        return null;
-    }
-
-    @Override
     public void executeNextPhase(SearchPhase currentPhase, SearchPhase nextPhase) {
         try {
             nextPhase.run();
@@ -137,7 +137,7 @@ public final class MockSearchPhaseContext implements SearchPhaseContext {
 
     @Override
     public void addReleasable(Releasable releasable) {
-        // Noop
+        releasables.add(releasable);
     }
 
     @Override
