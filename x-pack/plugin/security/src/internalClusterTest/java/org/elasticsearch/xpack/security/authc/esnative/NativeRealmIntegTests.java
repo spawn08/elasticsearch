@@ -8,6 +8,7 @@ package org.elasticsearch.xpack.security.authc.esnative;
 
 import org.apache.lucene.util.CollectionUtil;
 import org.elasticsearch.ElasticsearchSecurityException;
+import org.elasticsearch.action.ActionRequestValidationException;
 import org.elasticsearch.action.ActionResponse;
 import org.elasticsearch.action.admin.cluster.health.ClusterHealthResponse;
 import org.elasticsearch.action.admin.cluster.snapshots.restore.RestoreSnapshotResponse;
@@ -20,6 +21,7 @@ import org.elasticsearch.common.bytes.BytesArray;
 import org.elasticsearch.common.settings.SecureString;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.unit.ByteSizeUnit;
+import org.elasticsearch.protocol.xpack.XPackUsageRequest;
 import org.elasticsearch.rest.RestStatus;
 import org.elasticsearch.snapshots.SnapshotInfo;
 import org.elasticsearch.snapshots.SnapshotState;
@@ -29,7 +31,7 @@ import org.elasticsearch.test.SecuritySettingsSourceField;
 import org.elasticsearch.transport.TransportRequest;
 import org.elasticsearch.xcontent.XContentType;
 import org.elasticsearch.xpack.core.XPackFeatureSet;
-import org.elasticsearch.xpack.core.action.XPackUsageRequestBuilder;
+import org.elasticsearch.xpack.core.action.XPackUsageAction;
 import org.elasticsearch.xpack.core.action.XPackUsageResponse;
 import org.elasticsearch.xpack.core.security.SecurityFeatureSetUsage;
 import org.elasticsearch.xpack.core.security.action.realm.ClearRealmCacheRequestBuilder;
@@ -146,6 +148,23 @@ public class NativeRealmIntegTests extends NativeRealmIntegTestCase {
         assertFalse("role shouldn't be found", resp2.found());
     }
 
+    public void testDisablingOwnUser() throws Exception {
+        preparePutUser("joe", "s3krit-password", hasher, SecuritySettingsSource.TEST_ROLE).get();
+        GetUsersResponse resp = new GetUsersRequestBuilder(client()).usernames("joe").get();
+        assertTrue("user should exist", resp.hasUsers());
+        String token = basicAuthHeaderValue("joe", new SecureString("s3krit-password"));
+        var joeClient = client().filterWithHeader(Collections.singletonMap("Authorization", token));
+        var joeSelfDisableRequest = new PutUserRequestBuilder(joeClient).username("joe")
+            .password("s3krit-password".toCharArray(), hasher)
+            .roles(SecuritySettingsSource.TEST_ROLE)
+            .enabled(false);
+        ActionRequestValidationException ex = expectThrows(ActionRequestValidationException.class, joeSelfDisableRequest::get);
+        assertThat(
+            ex.getMessage(),
+            containsString("native and reserved realm users may not update the enabled status of their own account")
+        );
+    }
+
     public void testGettingUserThatDoesntExist() throws Exception {
         GetUsersResponse resp = new GetUsersRequestBuilder(client()).usernames("joe").get();
         assertFalse("user should not exist", resp.hasUsers());
@@ -223,6 +242,7 @@ public class NativeRealmIntegTests extends NativeRealmIntegTestCase {
                 new BytesArray("{\"match_all\": {}}"),
                 randomBoolean()
             )
+            .description(randomAlphaOfLengthBetween(5, 20))
             .metadata(metadata)
             .get();
         logger.error("--> waiting for .security index");
@@ -245,6 +265,7 @@ public class NativeRealmIntegTests extends NativeRealmIntegTestCase {
                 new BytesArray("{\"match_all\": {}}"),
                 randomBoolean()
             )
+            .description(randomAlphaOfLengthBetween(5, 20))
             .get();
         preparePutRole("test_role3").cluster("all", "none")
             .runAs("root", "nobody")
@@ -256,6 +277,7 @@ public class NativeRealmIntegTests extends NativeRealmIntegTestCase {
                 new BytesArray("{\"match_all\": {}}"),
                 randomBoolean()
             )
+            .description(randomAlphaOfLengthBetween(5, 20))
             .get();
 
         logger.info("--> retrieving all roles");
@@ -499,7 +521,7 @@ public class NativeRealmIntegTests extends NativeRealmIntegTestCase {
         ensureGreen(SECURITY_MAIN_ALIAS);
         logger.info("-->  creating repository");
         assertAcked(
-            clusterAdmin().preparePutRepository("test-repo")
+            clusterAdmin().preparePutRepository(TEST_REQUEST_TIMEOUT, TEST_REQUEST_TIMEOUT, "test-repo")
                 .setType("fs")
                 .setSettings(
                     Settings.builder()
@@ -513,7 +535,7 @@ public class NativeRealmIntegTests extends NativeRealmIntegTestCase {
         SnapshotInfo snapshotInfo = client().filterWithHeader(Collections.singletonMap("Authorization", token))
             .admin()
             .cluster()
-            .prepareCreateSnapshot("test-repo", "test-snap-1")
+            .prepareCreateSnapshot(TEST_REQUEST_TIMEOUT, "test-repo", "test-snap-1")
             .setWaitForCompletion(true)
             .setIncludeGlobalState(false)
             .setFeatureStates(SECURITY_FEATURE_NAME)
@@ -536,7 +558,7 @@ public class NativeRealmIntegTests extends NativeRealmIntegTestCase {
         GetRolesResponse getRolesResponse = new GetRolesRequestBuilder(client()).names("test_role").get();
         assertThat(getRolesResponse.roles().length, is(0));
         // restore
-        RestoreSnapshotResponse response = clusterAdmin().prepareRestoreSnapshot("test-repo", "test-snap-1")
+        RestoreSnapshotResponse response = clusterAdmin().prepareRestoreSnapshot(TEST_REQUEST_TIMEOUT, "test-repo", "test-snap-1")
             .setWaitForCompletion(true)
             .setIncludeAliases(randomBoolean()) // Aliases are always restored for system indices
             .setFeatureStates(SECURITY_FEATURE_NAME)
@@ -562,7 +584,7 @@ public class NativeRealmIntegTests extends NativeRealmIntegTestCase {
             .prepareCreate("idx")
             .get();
         assertThat(createIndexResponse.isAcknowledged(), is(true));
-        assertAcked(clusterAdmin().prepareDeleteRepository("test-repo"));
+        assertAcked(clusterAdmin().prepareDeleteRepository(TEST_REQUEST_TIMEOUT, TEST_REQUEST_TIMEOUT, "test-repo"));
     }
 
     public void testAuthenticateWithDeletedRole() {
@@ -898,7 +920,7 @@ public class NativeRealmIntegTests extends NativeRealmIntegTestCase {
             preparePutUser("joe" + i, "s3krit-password", hasher, "superuser").get();
         }
 
-        XPackUsageResponse response = new XPackUsageRequestBuilder(client()).get();
+        XPackUsageResponse response = safeGet(client().execute(XPackUsageAction.INSTANCE, new XPackUsageRequest(SAFE_AWAIT_TIMEOUT)));
         Optional<XPackFeatureSet.Usage> securityUsage = response.getUsages()
             .stream()
             .filter(usage -> usage instanceof SecurityFeatureSetUsage)

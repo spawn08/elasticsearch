@@ -23,15 +23,16 @@ import org.elasticsearch.cluster.service.MasterServiceTaskQueue;
 import org.elasticsearch.common.Priority;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.compress.CompressedXContent;
-import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.core.IOUtils;
 import org.elasticsearch.core.TimeValue;
 import org.elasticsearch.index.Index;
+import org.elasticsearch.index.IndexVersion;
 import org.elasticsearch.index.mapper.DocumentMapper;
 import org.elasticsearch.index.mapper.MapperService;
 import org.elasticsearch.index.mapper.MapperService.MergeReason;
 import org.elasticsearch.index.mapper.Mapping;
 import org.elasticsearch.indices.IndicesService;
+import org.elasticsearch.injection.guice.Inject;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -193,12 +194,14 @@ public class MetadataMappingService {
                 IndexMetadata.Builder indexMetadataBuilder = IndexMetadata.builder(indexMetadata);
                 // Mapping updates on a single type may have side-effects on other types so we need to
                 // update mapping metadata on all types
-                DocumentMapper mapper = mapperService.documentMapper();
-                if (mapper != null) {
-                    indexMetadataBuilder.putMapping(new MappingMetadata(mapper));
+                DocumentMapper docMapper = mapperService.documentMapper();
+                if (docMapper != null) {
+                    indexMetadataBuilder.putMapping(new MappingMetadata(docMapper));
+                    indexMetadataBuilder.putInferenceFields(docMapper.mappers().inferenceFields());
                 }
                 if (updatedMapping) {
-                    indexMetadataBuilder.mappingVersion(1 + indexMetadataBuilder.mappingVersion());
+                    indexMetadataBuilder.mappingVersion(1 + indexMetadataBuilder.mappingVersion())
+                        .mappingsUpdatedVersion(IndexVersion.current());
                 }
                 /*
                  * This implicitly increments the index metadata version and builds the index metadata. This means that we need to have

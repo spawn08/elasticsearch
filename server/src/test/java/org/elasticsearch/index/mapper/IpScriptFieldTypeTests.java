@@ -156,6 +156,11 @@ public class IpScriptFieldTypeTests extends AbstractScriptFieldTypeTestCase {
                     }
 
                     @Override
+                    public boolean needs_termStats() {
+                        return false;
+                    }
+
+                    @Override
                     public ScoreScript newInstance(DocReader docReader) {
                         return new ScoreScript(Map.of(), searchContext.lookup(), docReader) {
                             @Override
@@ -228,7 +233,6 @@ public class IpScriptFieldTypeTests extends AbstractScriptFieldTypeTestCase {
     }
 
     @Override
-    @AwaitsFix(bugUrl = "https://github.com/elastic/elasticsearch/issues/106900")
     public void testTermsQuery() throws IOException {
         try (Directory directory = newDirectory(); RandomIndexWriter iw = new RandomIndexWriter(random(), directory)) {
             addDocument(iw, List.of(new StoredField("_source", new BytesRef("{\"foo\": [\"192.168.0.1\"]}"))));
