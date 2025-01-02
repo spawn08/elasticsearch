@@ -19,6 +19,7 @@ import org.elasticsearch.inference.Model;
 import org.elasticsearch.inference.ModelConfigurations;
 import org.elasticsearch.inference.ModelSecrets;
 import org.elasticsearch.inference.SimilarityMeasure;
+import org.elasticsearch.inference.TaskType;
 import org.elasticsearch.threadpool.ScalingExecutorBuilder;
 import org.elasticsearch.xpack.core.inference.results.ChatCompletionResults;
 import org.elasticsearch.xpack.inference.common.Truncator;
@@ -160,9 +161,11 @@ public final class Utils {
         var mockConfigs = mock(ModelConfigurations.class);
         when(mockConfigs.getInferenceEntityId()).thenReturn(inferenceEntityId);
         when(mockConfigs.getService()).thenReturn(serviceName);
+        when(mockConfigs.getTaskType()).thenReturn(TaskType.TEXT_EMBEDDING);
 
         var mockModel = mock(Model.class);
         when(mockModel.getConfigurations()).thenReturn(mockConfigs);
+        when(mockModel.getTaskType()).thenReturn(TaskType.TEXT_EMBEDDING);
 
         return mockModel;
     }
@@ -172,6 +175,19 @@ public final class Utils {
     }
 
     public record PersistedConfig(Map<String, Object> config, Map<String, Object> secrets) {}
+
+    public static PersistedConfig getPersistedConfigMap(
+        Map<String, Object> serviceSettings,
+        Map<String, Object> taskSettings,
+        Map<String, Object> chunkingSettings,
+        Map<String, Object> secretSettings
+    ) {
+
+        var persistedConfigMap = getPersistedConfigMap(serviceSettings, taskSettings, secretSettings);
+        persistedConfigMap.config.put(ModelConfigurations.CHUNKING_SETTINGS, chunkingSettings);
+
+        return persistedConfigMap;
+    }
 
     public static PersistedConfig getPersistedConfigMap(
         Map<String, Object> serviceSettings,
@@ -195,6 +211,18 @@ public final class Utils {
             new HashMap<>(Map.of(ModelConfigurations.SERVICE_SETTINGS, serviceSettings, ModelConfigurations.TASK_SETTINGS, taskSettings)),
             null
         );
+    }
+
+    public static Map<String, Object> getRequestConfigMap(
+        Map<String, Object> serviceSettings,
+        Map<String, Object> taskSettings,
+        Map<String, Object> chunkingSettings,
+        Map<String, Object> secretSettings
+    ) {
+        var requestConfigMap = getRequestConfigMap(serviceSettings, taskSettings, secretSettings);
+        requestConfigMap.put(ModelConfigurations.CHUNKING_SETTINGS, chunkingSettings);
+
+        return requestConfigMap;
     }
 
     public static Map<String, Object> getRequestConfigMap(

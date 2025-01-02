@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 package fixture.gcs;
 
@@ -23,6 +24,7 @@ import org.elasticsearch.core.SuppressForbidden;
 import org.elasticsearch.core.Tuple;
 import org.elasticsearch.rest.RestStatus;
 import org.elasticsearch.rest.RestUtils;
+import org.elasticsearch.test.fixture.HttpHeaderParser;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -56,8 +58,6 @@ import static org.elasticsearch.core.Strings.format;
 public class GoogleCloudStorageHttpHandler implements HttpHandler {
 
     private static final Logger logger = LogManager.getLogger(GoogleCloudStorageHttpHandler.class);
-
-    private static final Pattern RANGE_MATCHER = Pattern.compile("bytes=([0-9]*)-([0-9]*)");
 
     private final ConcurrentMap<String, BytesReference> blobs;
     private final String bucket;
@@ -95,7 +95,7 @@ public class GoogleCloudStorageHttpHandler implements HttpHandler {
             } else if (Regex.simpleMatch("GET /storage/v1/b/" + bucket + "/o*", request)) {
                 // List Objects https://cloud.google.com/storage/docs/json_api/v1/objects/list
                 final Map<String, String> params = new HashMap<>();
-                RestUtils.decodeQueryString(exchange.getRequestURI().getQuery(), 0, params);
+                RestUtils.decodeQueryString(exchange.getRequestURI(), params);
                 final String prefix = params.getOrDefault("prefix", "");
                 final String delimiter = params.get("delimiter");
 
@@ -130,19 +130,19 @@ public class GoogleCloudStorageHttpHandler implements HttpHandler {
                 // Download Object https://cloud.google.com/storage/docs/request-body
                 BytesReference blob = blobs.get(exchange.getRequestURI().getPath().replace("/download/storage/v1/b/" + bucket + "/o/", ""));
                 if (blob != null) {
-                    final String range = exchange.getRequestHeaders().getFirst("Range");
+                    final String rangeHeader = exchange.getRequestHeaders().getFirst("Range");
                     final long offset;
                     final long end;
-                    if (range == null) {
+                    if (rangeHeader == null) {
                         offset = 0L;
                         end = blob.length() - 1;
                     } else {
-                        Matcher matcher = RANGE_MATCHER.matcher(range);
-                        if (matcher.find() == false) {
-                            throw new AssertionError("Range bytes header does not match expected format: " + range);
+                        final HttpHeaderParser.Range range = HttpHeaderParser.parseRangeHeader(rangeHeader);
+                        if (range == null) {
+                            throw new AssertionError("Range bytes header does not match expected format: " + rangeHeader);
                         }
-                        offset = Long.parseLong(matcher.group(1));
-                        end = Long.parseLong(matcher.group(2));
+                        offset = range.start();
+                        end = range.end();
                     }
 
                     if (offset >= blob.length()) {
@@ -212,7 +212,7 @@ public class GoogleCloudStorageHttpHandler implements HttpHandler {
             } else if (Regex.simpleMatch("POST /upload/storage/v1/b/" + bucket + "/*uploadType=resumable*", request)) {
                 // Resumable upload initialization https://cloud.google.com/storage/docs/json_api/v1/how-tos/resumable-upload
                 final Map<String, String> params = new HashMap<>();
-                RestUtils.decodeQueryString(exchange.getRequestURI().getQuery(), 0, params);
+                RestUtils.decodeQueryString(exchange.getRequestURI(), params);
                 final String blobName = params.get("name");
                 blobs.put(blobName, BytesArray.EMPTY);
 
@@ -237,7 +237,7 @@ public class GoogleCloudStorageHttpHandler implements HttpHandler {
             } else if (Regex.simpleMatch("PUT /upload/storage/v1/b/" + bucket + "/o?*uploadType=resumable*", request)) {
                 // Resumable upload https://cloud.google.com/storage/docs/json_api/v1/how-tos/resumable-upload
                 final Map<String, String> params = new HashMap<>();
-                RestUtils.decodeQueryString(exchange.getRequestURI().getQuery(), 0, params);
+                RestUtils.decodeQueryString(exchange.getRequestURI(), params);
 
                 final String blobName = params.get("test_blob_name");
                 if (blobs.containsKey(blobName) == false) {
@@ -269,8 +269,6 @@ public class GoogleCloudStorageHttpHandler implements HttpHandler {
                 exchange.sendResponseHeaders(RestStatus.NOT_FOUND.getStatus(), -1);
             }
         } finally {
-            int read = exchange.getRequestBody().read();
-            assert read == -1 : "Request body should have been fully read here but saw [" + read + "]";
             exchange.close();
         }
     }

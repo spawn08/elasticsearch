@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.health.node.selection;
@@ -76,8 +77,8 @@ public class HealthNodeTaskExecutorTests extends ESTestCase {
         clusterService = createClusterService(threadPool);
         localNodeId = clusterService.localNode().getId();
         persistentTasksService = mock(PersistentTasksService.class);
-        featureService = new FeatureService(List.of(new HealthFeatures()));
         settings = Settings.builder().build();
+        featureService = new FeatureService(List.of(new HealthFeatures()));
         clusterSettings = new ClusterSettings(settings, ClusterSettings.BUILT_IN_CLUSTER_SETTINGS);
     }
 
@@ -195,6 +196,7 @@ public class HealthNodeTaskExecutorTests extends ESTestCase {
                 localNodeId,
                 SingleNodeShutdownMetadata.builder()
                     .setNodeId(localNodeId)
+                    .setNodeEphemeralId(localNodeId)
                     .setReason("shutdown for a unit test")
                     .setType(type)
                     .setStartedAtMillis(randomNonNegativeLong())

@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.cluster;
@@ -159,8 +160,7 @@ public class ClusterInfo implements ChunkedToXContent, Writeable {
                 }
                 builder.endObject(); // end "most_available"
             }
-            builder.endObject(); // end $nodename
-            return builder;
+            return builder.endObject(); // end $nodename
         }),
             singleChunk(
                 (builder, p) -> builder.endObject() // end "nodes"
@@ -201,9 +201,7 @@ public class ClusterInfo implements ChunkedToXContent, Writeable {
                 }
                 return builder.endObject(); // NodeAndPath
             }),
-
             endArray() // end "reserved_sizes"
-
         );
     }
 

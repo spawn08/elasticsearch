@@ -33,7 +33,6 @@ import java.io.IOException;
 import java.util.BitSet;
 import java.util.Collections;
 import java.util.List;
-import java.util.function.Function;
 
 import static org.elasticsearch.common.logging.LoggerMessageFormat.format;
 import static org.elasticsearch.xpack.esql.core.expression.TypeResolutions.ParamOrdinal.DEFAULT;
@@ -152,14 +151,14 @@ public class In extends EsqlScalarFunction {
     public boolean foldable() {
         // QL's In fold()s to null, if value() is null, but isn't foldable() unless all children are
         // TODO: update this null check in QL too?
-        return Expressions.isNull(value)
+        return Expressions.isGuaranteedNull(value)
             || Expressions.foldable(children())
-            || (Expressions.foldable(list) && list.stream().allMatch(Expressions::isNull));
+            || (Expressions.foldable(list) && list.stream().allMatch(Expressions::isGuaranteedNull));
     }
 
     @Override
     public Object fold() {
-        if (Expressions.isNull(value) || list.stream().allMatch(Expressions::isNull)) {
+        if (Expressions.isGuaranteedNull(value) || list.stream().allMatch(Expressions::isGuaranteedNull)) {
             return null;
         }
         return super.fold();
@@ -213,9 +212,7 @@ public class In extends EsqlScalarFunction {
     }
 
     @Override
-    public EvalOperator.ExpressionEvaluator.Factory toEvaluator(
-        Function<Expression, EvalOperator.ExpressionEvaluator.Factory> toEvaluator
-    ) {
+    public EvalOperator.ExpressionEvaluator.Factory toEvaluator(ToEvaluator toEvaluator) {
         var commonType = commonType();
         EvalOperator.ExpressionEvaluator.Factory lhs;
         EvalOperator.ExpressionEvaluator.Factory[] factories;
@@ -226,7 +223,7 @@ public class In extends EsqlScalarFunction {
                 .toArray(EvalOperator.ExpressionEvaluator.Factory[]::new);
         } else {
             lhs = toEvaluator.apply(value);
-            factories = list.stream().map(e -> toEvaluator.apply(e)).toArray(EvalOperator.ExpressionEvaluator.Factory[]::new);
+            factories = list.stream().map(toEvaluator::apply).toArray(EvalOperator.ExpressionEvaluator.Factory[]::new);
         }
 
         if (commonType == BOOLEAN) {

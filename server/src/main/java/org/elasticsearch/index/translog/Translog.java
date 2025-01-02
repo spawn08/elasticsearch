@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.index.translog;
@@ -217,6 +218,10 @@ public class Translog extends AbstractIndexShardComponent implements IndexShardC
             IOUtils.closeWhileHandlingException(readers);
             throw e;
         }
+    }
+
+    public static void deleteAll(Path translogLocation) throws IOException {
+        IOUtils.rm(translogLocation);
     }
 
     /** recover all translog files found on disk */
@@ -966,7 +971,7 @@ public class Translog extends AbstractIndexShardComponent implements IndexShardC
 
     public record Location(long generation, long translogLocation, int size) implements Comparable<Location> {
 
-        public static Location EMPTY = new Location(0, 0, 0);
+        public static final Location EMPTY = new Location(0, 0, 0);
 
         @Override
         public String toString() {

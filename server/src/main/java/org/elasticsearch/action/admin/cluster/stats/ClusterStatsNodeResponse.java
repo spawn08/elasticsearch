@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.action.admin.cluster.stats;
@@ -30,6 +31,7 @@ public class ClusterStatsNodeResponse extends BaseNodeResponse {
     private final ClusterHealthStatus clusterStatus;
     private final SearchUsageStats searchUsageStats;
     private final RepositoryUsageStats repositoryUsageStats;
+    private final CCSTelemetrySnapshot ccsMetrics;
 
     public ClusterStatsNodeResponse(StreamInput in) throws IOException {
         super(in);
@@ -42,10 +44,12 @@ public class ClusterStatsNodeResponse extends BaseNodeResponse {
         } else {
             searchUsageStats = new SearchUsageStats();
         }
-        if (in.getTransportVersion().onOrAfter(TransportVersions.REPOSITORIES_TELEMETRY)) {
+        if (in.getTransportVersion().onOrAfter(TransportVersions.V_8_16_0)) {
             repositoryUsageStats = RepositoryUsageStats.readFrom(in);
+            ccsMetrics = new CCSTelemetrySnapshot(in);
         } else {
             repositoryUsageStats = RepositoryUsageStats.EMPTY;
+            ccsMetrics = new CCSTelemetrySnapshot();
         }
     }
 
@@ -56,7 +60,8 @@ public class ClusterStatsNodeResponse extends BaseNodeResponse {
         NodeStats nodeStats,
         ShardStats[] shardsStats,
         SearchUsageStats searchUsageStats,
-        RepositoryUsageStats repositoryUsageStats
+        RepositoryUsageStats repositoryUsageStats,
+        CCSTelemetrySnapshot ccsTelemetrySnapshot
     ) {
         super(node);
         this.nodeInfo = nodeInfo;
@@ -65,6 +70,7 @@ public class ClusterStatsNodeResponse extends BaseNodeResponse {
         this.clusterStatus = clusterStatus;
         this.searchUsageStats = Objects.requireNonNull(searchUsageStats);
         this.repositoryUsageStats = Objects.requireNonNull(repositoryUsageStats);
+        this.ccsMetrics = ccsTelemetrySnapshot;
     }
 
     public NodeInfo nodeInfo() {
@@ -95,6 +101,10 @@ public class ClusterStatsNodeResponse extends BaseNodeResponse {
         return repositoryUsageStats;
     }
 
+    public CCSTelemetrySnapshot getCcsMetrics() {
+        return ccsMetrics;
+    }
+
     @Override
     public void writeTo(StreamOutput out) throws IOException {
         super.writeTo(out);
@@ -105,8 +115,10 @@ public class ClusterStatsNodeResponse extends BaseNodeResponse {
         if (out.getTransportVersion().onOrAfter(TransportVersions.V_8_6_0)) {
             searchUsageStats.writeTo(out);
         }
-        if (out.getTransportVersion().onOrAfter(TransportVersions.REPOSITORIES_TELEMETRY)) {
+        if (out.getTransportVersion().onOrAfter(TransportVersions.V_8_16_0)) {
             repositoryUsageStats.writeTo(out);
+            ccsMetrics.writeTo(out);
         } // else just drop these stats, ok for bwc
     }
+
 }

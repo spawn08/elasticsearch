@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 package org.elasticsearch.cluster.metadata;
 
@@ -17,11 +18,13 @@ import org.elasticsearch.index.IndexVersions;
 import org.elasticsearch.index.mapper.MapperMetrics;
 import org.elasticsearch.index.mapper.MapperRegistry;
 import org.elasticsearch.plugins.MapperPlugin;
+import org.elasticsearch.snapshots.SearchableSnapshotsSettings;
 import org.elasticsearch.test.ESTestCase;
 import org.elasticsearch.test.index.IndexVersionUtils;
 
 import java.util.Collections;
 
+import static org.elasticsearch.index.IndexModule.INDEX_STORE_TYPE_SETTING;
 import static org.hamcrest.Matchers.equalTo;
 
 public class IndexMetadataVerifierTests extends ESTestCase {
@@ -96,7 +99,8 @@ public class IndexMetadataVerifierTests extends ESTestCase {
                 .put("index.similarity.my_similarity.after_effect", "l")
                 .build()
         );
-        service.verifyIndexMetadata(src, IndexVersions.MINIMUM_COMPATIBLE);
+        // The random IndexMetadata.SETTING_VERSION_CREATED in IndexMetadata can be as low as MINIMUM_READONLY_COMPATIBLE
+        service.verifyIndexMetadata(src, IndexVersions.MINIMUM_READONLY_COMPATIBLE, IndexVersions.MINIMUM_READONLY_COMPATIBLE);
     }
 
     public void testIncompatibleVersion() {
@@ -109,7 +113,7 @@ public class IndexMetadataVerifierTests extends ESTestCase {
         );
         String message = expectThrows(
             IllegalStateException.class,
-            () -> service.verifyIndexMetadata(metadata, IndexVersions.MINIMUM_COMPATIBLE)
+            () -> service.verifyIndexMetadata(metadata, IndexVersions.MINIMUM_COMPATIBLE, IndexVersions.MINIMUM_READONLY_COMPATIBLE)
         ).getMessage();
         assertThat(
             message,
@@ -131,7 +135,80 @@ public class IndexMetadataVerifierTests extends ESTestCase {
 
         indexCreated = IndexVersionUtils.randomVersionBetween(random(), minCompat, IndexVersion.current());
         IndexMetadata goodMeta = newIndexMeta("foo", Settings.builder().put(IndexMetadata.SETTING_VERSION_CREATED, indexCreated).build());
-        service.verifyIndexMetadata(goodMeta, IndexVersions.MINIMUM_COMPATIBLE);
+        service.verifyIndexMetadata(goodMeta, IndexVersions.MINIMUM_COMPATIBLE, IndexVersions.MINIMUM_READONLY_COMPATIBLE);
+    }
+
+    public void testReadOnlyVersionCompatibility() {
+        var service = getIndexMetadataVerifier();
+        var indexCreated = IndexVersions.MINIMUM_READONLY_COMPATIBLE;
+        {
+            var idxMetadata = newIndexMeta(
+                "not-searchable-snapshot",
+                Settings.builder()
+                    .put(IndexMetadata.SETTING_BLOCKS_WRITE, randomBoolean())
+                    .put(IndexMetadata.SETTING_VERSION_CREATED, indexCreated)
+                    .build()
+            );
+            String message = expectThrows(
+                IllegalStateException.class,
+                () -> service.verifyIndexMetadata(idxMetadata, IndexVersions.MINIMUM_COMPATIBLE, IndexVersions.MINIMUM_READONLY_COMPATIBLE)
+            ).getMessage();
+            assertThat(
+                message,
+                equalTo(
+                    "The index [not-searchable-snapshot/"
+                        + idxMetadata.getIndexUUID()
+                        + "] has current compatibility version ["
+                        + indexCreated.toReleaseVersion()
+                        + "] "
+                        + "but the minimum compatible version is ["
+                        + IndexVersions.MINIMUM_COMPATIBLE.toReleaseVersion()
+                        + "]. It should be re-indexed in Elasticsearch "
+                        + (Version.CURRENT.major - 1)
+                        + ".x before upgrading to "
+                        + Build.current().version()
+                        + "."
+                )
+            );
+        }
+        {
+            var idxMetadata = newIndexMeta(
+                "not-read-only",
+                Settings.builder()
+                    .put(IndexMetadata.SETTING_VERSION_CREATED, indexCreated)
+                    .put(INDEX_STORE_TYPE_SETTING.getKey(), SearchableSnapshotsSettings.SEARCHABLE_SNAPSHOT_STORE_TYPE)
+                    .build()
+            );
+            String message = expectThrows(
+                IllegalStateException.class,
+                () -> service.verifyIndexMetadata(idxMetadata, IndexVersions.MINIMUM_COMPATIBLE, IndexVersions.MINIMUM_READONLY_COMPATIBLE)
+            ).getMessage();
+            assertThat(
+                message,
+                equalTo(
+                    "The index [not-read-only/"
+                        + idxMetadata.getIndexUUID()
+                        + "] created in version ["
+                        + indexCreated
+                        + "] with current compatibility version ["
+                        + indexCreated.toReleaseVersion()
+                        + "] must be marked as read-only using the setting [index.blocks.write] set to [true] before upgrading to "
+                        + Build.current().version()
+                        + "."
+                )
+            );
+        }
+        {
+            var idxMetadata = newIndexMeta(
+                "good",
+                Settings.builder()
+                    .put(IndexMetadata.SETTING_BLOCKS_WRITE, true)
+                    .put(IndexMetadata.SETTING_VERSION_CREATED, indexCreated)
+                    .put(INDEX_STORE_TYPE_SETTING.getKey(), SearchableSnapshotsSettings.SEARCHABLE_SNAPSHOT_STORE_TYPE)
+                    .build()
+            );
+            service.verifyIndexMetadata(idxMetadata, IndexVersions.MINIMUM_COMPATIBLE, IndexVersions.MINIMUM_READONLY_COMPATIBLE);
+        }
     }
 
     private IndexMetadataVerifier getIndexMetadataVerifier() {

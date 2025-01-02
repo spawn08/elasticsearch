@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.inference;
@@ -30,13 +31,17 @@ public enum TaskType implements Writeable {
         }
     };
 
-    public static String NAME = "task_type";
+    public static final String NAME = "task_type";
 
     public static TaskType fromString(String name) {
         return valueOf(name.trim().toUpperCase(Locale.ROOT));
     }
 
     public static TaskType fromStringOrStatusException(String name) {
+        if (name == null) {
+            throw new ElasticsearchStatusException("Task type must not be null", RestStatus.BAD_REQUEST);
+        }
+
         try {
             TaskType taskType = TaskType.fromString(name);
             return Objects.requireNonNull(taskType);

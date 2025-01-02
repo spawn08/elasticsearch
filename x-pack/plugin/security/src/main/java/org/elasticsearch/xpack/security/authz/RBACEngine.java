@@ -85,6 +85,7 @@ import org.elasticsearch.xpack.core.security.authz.privilege.ClusterPrivilegeRes
 import org.elasticsearch.xpack.core.security.authz.privilege.ConfigurableClusterPrivilege;
 import org.elasticsearch.xpack.core.security.authz.privilege.NamedClusterPrivilege;
 import org.elasticsearch.xpack.core.security.authz.privilege.Privilege;
+import org.elasticsearch.xpack.core.security.support.Automatons;
 import org.elasticsearch.xpack.core.security.support.StringMatcher;
 import org.elasticsearch.xpack.core.sql.SqlAsyncActionNames;
 import org.elasticsearch.xpack.security.action.user.TransportChangePasswordAction;
@@ -128,6 +129,19 @@ public class RBACEngine implements AuthorizationEngine {
     private static final String DELETE_SUB_REQUEST_REPLICA = TransportDeleteAction.NAME + "[r]";
 
     private static final Logger logger = LogManager.getLogger(RBACEngine.class);
+
+    private static final Set<String> SCROLL_RELATED_ACTIONS = Set.of(
+        TransportSearchScrollAction.TYPE.name(),
+        SearchTransportService.FETCH_ID_SCROLL_ACTION_NAME,
+        SearchTransportService.QUERY_FETCH_SCROLL_ACTION_NAME,
+        SearchTransportService.QUERY_SCROLL_ACTION_NAME,
+        SearchTransportService.FREE_CONTEXT_ACTION_NAME,
+        SearchTransportService.FREE_CONTEXT_SCROLL_ACTION_NAME,
+        TransportClearScrollAction.NAME,
+        "indices:data/read/sql/close_cursor",
+        SearchTransportService.CLEAR_SCROLL_CONTEXTS_ACTION_NAME
+    );
+
     private final Settings settings;
     private final CompositeRolesStore rolesStore;
     private final FieldPermissionsCache fieldPermissionsCache;
@@ -319,7 +333,7 @@ public class RBACEngine implements AuthorizationEngine {
             // need to validate that the action is allowed and then move on
             listener.onResponse(role.checkIndicesAction(action) ? IndexAuthorizationResult.EMPTY : IndexAuthorizationResult.DENIED);
         } else if (request instanceof IndicesRequest == false) {
-            if (isScrollRelatedAction(action)) {
+            if (SCROLL_RELATED_ACTIONS.contains(action)) {
                 // scroll is special
                 // some APIs are indices requests that are not actually associated with indices. For example,
                 // search scroll request, is categorized under the indices context, but doesn't hold indices names
@@ -550,7 +564,7 @@ public class RBACEngine implements AuthorizationEngine {
                 Automaton existingPermissions = permissionMap.computeIfAbsent(entry.getKey(), role::allowedActionsMatcher);
                 for (String alias : entry.getValue()) {
                     Automaton newNamePermissions = permissionMap.computeIfAbsent(alias, role::allowedActionsMatcher);
-                    if (Operations.subsetOf(newNamePermissions, existingPermissions) == false) {
+                    if (Automatons.subsetOf(newNamePermissions, existingPermissions) == false) {
                         listener.onResponse(AuthorizationResult.deny());
                         return;
                     }
@@ -997,17 +1011,6 @@ public class RBACEngine implements AuthorizationEngine {
                 return Objects.hash(role, authenticatedUserAuthorizationInfo);
             }
         }
-    }
-
-    private static boolean isScrollRelatedAction(String action) {
-        return action.equals(TransportSearchScrollAction.TYPE.name())
-            || action.equals(SearchTransportService.FETCH_ID_SCROLL_ACTION_NAME)
-            || action.equals(SearchTransportService.QUERY_FETCH_SCROLL_ACTION_NAME)
-            || action.equals(SearchTransportService.QUERY_SCROLL_ACTION_NAME)
-            || action.equals(SearchTransportService.FREE_CONTEXT_SCROLL_ACTION_NAME)
-            || action.equals(TransportClearScrollAction.NAME)
-            || action.equals("indices:data/read/sql/close_cursor")
-            || action.equals(SearchTransportService.CLEAR_SCROLL_CONTEXTS_ACTION_NAME);
     }
 
     private static boolean isAsyncRelatedAction(String action) {

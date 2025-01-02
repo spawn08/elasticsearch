@@ -118,6 +118,7 @@ public class SingleNodeShutdownStatus implements Writeable, ChunkedToXContentObj
     public Iterator<? extends ToXContent> toXContentChunked(ToXContent.Params params) {
         return Iterators.concat(startObject(), singleChunk((builder, p) -> {
             builder.field(SingleNodeShutdownMetadata.NODE_ID_FIELD.getPreferredName(), metadata.getNodeId());
+            builder.field(SingleNodeShutdownMetadata.NODE_EPHEMERAL_ID_FIELD.getPreferredName(), metadata.getNodeEphemeralId());
             builder.field(SingleNodeShutdownMetadata.TYPE_FIELD.getPreferredName(), metadata.getType());
             builder.field(SingleNodeShutdownMetadata.REASON_FIELD.getPreferredName(), metadata.getReason());
             if (metadata.getAllocationDelay() != null) {
@@ -126,7 +127,7 @@ public class SingleNodeShutdownStatus implements Writeable, ChunkedToXContentObj
                     metadata.getAllocationDelay().getStringRep()
                 );
             }
-            builder.timeField(
+            builder.timestampFieldsFromUnixEpochMillis(
                 SingleNodeShutdownMetadata.STARTED_AT_MILLIS_FIELD.getPreferredName(),
                 SingleNodeShutdownMetadata.STARTED_AT_READABLE_FIELD,
                 metadata.getStartedAtMillis()
@@ -142,7 +143,7 @@ public class SingleNodeShutdownStatus implements Writeable, ChunkedToXContentObj
                     builder.field(TARGET_NODE_NAME_FIELD.getPreferredName(), metadata.getTargetNodeName());
                 }
                 if (metadata.getGracePeriod() != null) {
-                    builder.timeField(
+                    builder.timestampField(
                         SingleNodeShutdownMetadata.GRACE_PERIOD_FIELD.getPreferredName(),
                         metadata.getGracePeriod().getStringRep()
                     );

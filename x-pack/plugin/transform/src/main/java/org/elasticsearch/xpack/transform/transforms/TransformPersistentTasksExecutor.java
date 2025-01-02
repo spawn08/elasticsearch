@@ -20,6 +20,7 @@ import org.elasticsearch.client.internal.Client;
 import org.elasticsearch.client.internal.ParentTaskAssigningClient;
 import org.elasticsearch.cluster.ClusterState;
 import org.elasticsearch.cluster.metadata.IndexNameExpressionResolver;
+import org.elasticsearch.cluster.metadata.Metadata;
 import org.elasticsearch.cluster.node.DiscoveryNode;
 import org.elasticsearch.cluster.routing.IndexRoutingTable;
 import org.elasticsearch.cluster.service.ClusterService;
@@ -58,6 +59,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.TreeMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -66,6 +68,8 @@ import java.util.stream.Collectors;
 import static org.elasticsearch.core.Strings.format;
 import static org.elasticsearch.xpack.core.common.notifications.Level.ERROR;
 import static org.elasticsearch.xpack.core.common.notifications.Level.INFO;
+import static org.elasticsearch.xpack.core.transform.TransformField.AWAITING_UPGRADE;
+import static org.elasticsearch.xpack.core.transform.TransformField.RESET_IN_PROGRESS;
 import static org.elasticsearch.xpack.transform.transforms.TransformNodes.nodeCanRunThisTransform;
 
 public class TransformPersistentTasksExecutor extends PersistentTasksExecutor<TransformTaskParams> {
@@ -117,11 +121,12 @@ public class TransformPersistentTasksExecutor extends PersistentTasksExecutor<Tr
          *
          * Operations on the transform node happen in {@link #nodeOperation()}
          */
-        if (TransformMetadata.getTransformMetadata(clusterState).isResetMode()) {
-            return new PersistentTasksCustomMetadata.Assignment(
-                null,
-                "Transform task will not be assigned as a feature reset is in progress."
-            );
+        var transformMetadata = TransformMetadata.getTransformMetadata(clusterState);
+        if (transformMetadata.upgradeMode()) {
+            return AWAITING_UPGRADE;
+        }
+        if (transformMetadata.resetMode()) {
+            return RESET_IN_PROGRESS;
         }
         List<String> unavailableIndices = verifyIndicesPrimaryShardsAreActive(clusterState, resolver);
         if (unavailableIndices.size() != 0) {
@@ -134,17 +139,28 @@ public class TransformPersistentTasksExecutor extends PersistentTasksExecutor<Tr
             logger.debug(reason);
             return new PersistentTasksCustomMetadata.Assignment(null, reason);
         }
+        Map<String, String> explainWhyAssignmentFailed = new TreeMap<>();
         DiscoveryNode discoveryNode = selectLeastLoadedNode(
             clusterState,
             candidateNodes,
-            node -> nodeCanRunThisTransform(node, params.getVersion(), params.requiresRemote(), null)
+            node -> nodeCanRunThisTransform(node, params.getVersion(), params.requiresRemote(), explainWhyAssignmentFailed)
         );
 
         if (discoveryNode == null) {
-            Map<String, String> explainWhyAssignmentFailed = new TreeMap<>();
-            for (DiscoveryNode node : clusterState.getNodes()) {
-                nodeCanRunThisTransform(node, params.getVersion(), params.requiresRemote(), explainWhyAssignmentFailed);
+            // clusterState can report an empty node list when the cluster health is yellow, if we have no other reason then include that
+            var nodes = clusterState.getNodes();
+            if (nodes.iterator().hasNext() == false && explainWhyAssignmentFailed.isEmpty()) {
+                var key = Optional.ofNullable(clusterState.getMetadata()).map(Metadata::clusterUUID).orElse("");
+                explainWhyAssignmentFailed.put(
+                    key,
+                    "No Discovery Nodes found in cluster state. Check cluster health and troubleshoot missing Discovery Nodes."
+                );
+            } else {
+                for (DiscoveryNode node : nodes) {
+                    nodeCanRunThisTransform(node, params.getVersion(), params.requiresRemote(), explainWhyAssignmentFailed);
+                }
             }
+
             String reason = "Not starting transform ["
                 + params.getId()
                 + "], reasons ["

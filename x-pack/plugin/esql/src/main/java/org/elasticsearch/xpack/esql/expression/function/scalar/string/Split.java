@@ -28,8 +28,8 @@ import org.elasticsearch.xpack.esql.expression.function.Param;
 import org.elasticsearch.xpack.esql.io.stream.PlanStreamInput;
 
 import java.io.IOException;
-import java.util.function.Function;
 
+import static org.elasticsearch.compute.ann.Fixed.Scope.THREAD_LOCAL;
 import static org.elasticsearch.xpack.esql.core.expression.TypeResolutions.ParamOrdinal.FIRST;
 import static org.elasticsearch.xpack.esql.core.expression.TypeResolutions.ParamOrdinal.SECOND;
 import static org.elasticsearch.xpack.esql.expression.EsqlTypeResolutions.isStringAndExact;
@@ -111,7 +111,7 @@ public class Split extends BinaryScalarFunction implements EvaluatorMapper {
         BytesRefBlock.Builder builder,
         BytesRef str,
         @Fixed byte delim,
-        @Fixed(includeInToString = false, build = true) BytesRef scratch
+        @Fixed(includeInToString = false, scope = THREAD_LOCAL) BytesRef scratch
     ) {
         scratch.bytes = str.bytes;
         scratch.offset = str.offset;
@@ -141,7 +141,7 @@ public class Split extends BinaryScalarFunction implements EvaluatorMapper {
         BytesRefBlock.Builder builder,
         BytesRef str,
         BytesRef delim,
-        @Fixed(includeInToString = false, build = true) BytesRef scratch
+        @Fixed(includeInToString = false, scope = THREAD_LOCAL) BytesRef scratch
     ) {
         checkDelimiter(delim);
         process(builder, str, delim.bytes[delim.offset], scratch);
@@ -158,7 +158,7 @@ public class Split extends BinaryScalarFunction implements EvaluatorMapper {
     }
 
     @Override
-    public ExpressionEvaluator.Factory toEvaluator(Function<Expression, ExpressionEvaluator.Factory> toEvaluator) {
+    public ExpressionEvaluator.Factory toEvaluator(ToEvaluator toEvaluator) {
         var str = toEvaluator.apply(left());
         if (right().foldable() == false) {
             return new SplitVariableEvaluator.Factory(source(), str, toEvaluator.apply(right()), context -> new BytesRef());

@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.index.mapper;
@@ -2052,6 +2053,38 @@ public class DocumentParserTests extends MapperServiceTestCase {
         assertNotNull(doc.rootDoc().getField("metrics.service.test.with.dots.max"));
     }
 
+    public void testSubobjectsFalseWithInnerDottedObjectDynamicFalse() throws Exception {
+        DocumentMapper mapper = createDocumentMapper(mapping(b -> {
+            b.startObject("metrics").field("type", "object").field("subobjects", false).field("dynamic", randomFrom("false", "runtime"));
+            b.startObject("properties").startObject("service.test.with.dots").field("type", "keyword").endObject().endObject();
+            b.endObject();
+        }));
+
+        ParsedDocument doc = mapper.parse(source("""
+            { "metrics": { "service": { "test.with.dots": "foo" }  } }"""));
+        assertNotNull(doc.rootDoc().getField("metrics.service.test.with.dots"));
+
+        doc = mapper.parse(source("""
+            { "metrics": { "service.test": { "with.dots": "foo" }  } }"""));
+        assertNotNull(doc.rootDoc().getField("metrics.service.test.with.dots"));
+
+        doc = mapper.parse(source("""
+            { "metrics": { "service": { "test": { "with.dots": "foo" }  }  } }"""));
+        assertNotNull(doc.rootDoc().getField("metrics.service.test.with.dots"));
+
+        doc = mapper.parse(source("""
+            { "metrics": { "service": { "test.other.dots": "foo" }  } }"""));
+        assertNull(doc.rootDoc().getField("metrics.service.test.other.dots"));
+
+        doc = mapper.parse(source("""
+            { "metrics": { "service.test": { "other.dots": "foo" }  } }"""));
+        assertNull(doc.rootDoc().getField("metrics.service.test.other.dots"));
+
+        doc = mapper.parse(source("""
+            { "metrics": { "service": { "test": { "other.dots": "foo" }  }  } }"""));
+        assertNull(doc.rootDoc().getField("metrics.service.test.other.dots"));
+    }
+
     public void testSubobjectsFalseRoot() throws Exception {
         DocumentMapper mapper = createDocumentMapper(mappingNoSubobjects(xContentBuilder -> {}));
         ParsedDocument doc = mapper.parse(source("""
@@ -2071,6 +2104,37 @@ public class DocumentParserTests extends MapperServiceTestCase {
         assertNotNull(doc.rootDoc().getField("metrics.service.time"));
         assertNotNull(doc.rootDoc().getField("metrics.service.time.max"));
         assertNotNull(doc.rootDoc().getField("metrics.service.test.with.dots"));
+    }
+
+    public void testSubobjectsFalseRootWithInnerDottedObjectDynamicFalse() throws Exception {
+        DocumentMapper mapper = createDocumentMapper(topMapping(b -> {
+            b.field("subobjects", false).field("dynamic", randomFrom("false", "runtime"));
+            b.startObject("properties").startObject("service.test.with.dots").field("type", "keyword").endObject().endObject();
+        }));
+
+        ParsedDocument doc = mapper.parse(source("""
+            { "service": { "test.with.dots": "foo" } }"""));
+        assertNotNull(doc.rootDoc().getField("service.test.with.dots"));
+
+        doc = mapper.parse(source("""
+            { "service.test": { "with.dots": "foo" } }"""));
+        assertNotNull(doc.rootDoc().getField("service.test.with.dots"));
+
+        doc = mapper.parse(source("""
+            { "service": { "test": { "with.dots": "foo" } } }"""));
+        assertNotNull(doc.rootDoc().getField("service.test.with.dots"));
+
+        doc = mapper.parse(source("""
+            { "service": { "test.other.dots": "foo" } }"""));
+        assertNull(doc.rootDoc().getField("service.test.other.dots"));
+
+        doc = mapper.parse(source("""
+            { "service.test": { "other.dots": "foo" } }"""));
+        assertNull(doc.rootDoc().getField("service.test.other.dots"));
+
+        doc = mapper.parse(source("""
+            { "service": { "test": { "other.dots": "foo" } } }"""));
+        assertNull(doc.rootDoc().getField("service.test.other.dots"));
     }
 
     public void testSubobjectsFalseStructuredPath() throws Exception {
@@ -2624,7 +2688,9 @@ public class DocumentParserTests extends MapperServiceTestCase {
             newMapping,
             newMapping.toCompressedXContent(),
             IndexVersion.current(),
-            MapperMetrics.NOOP
+            mapperService.getIndexSettings(),
+            MapperMetrics.NOOP,
+            "myIndex"
         );
         ParsedDocument doc2 = newDocMapper.parse(source("""
             {
@@ -3244,14 +3310,16 @@ public class DocumentParserTests extends MapperServiceTestCase {
             }
 
             @Override
-            public SourceLoader.SyntheticFieldLoader syntheticFieldLoader() {
-                return new StringStoredFieldFieldLoader(fullPath(), leafName()) {
+            protected SyntheticSourceSupport syntheticSourceSupport() {
+                var loader = new StringStoredFieldFieldLoader(fullPath(), leafName()) {
                     @Override
                     protected void write(XContentBuilder b, Object value) throws IOException {
                         BytesRef ref = (BytesRef) value;
                         b.utf8Value(ref.bytes, ref.offset, ref.length);
                     }
                 };
+
+                return new SyntheticSourceSupport.Native(loader);
             }
 
             private static final TypeParser PARSER = new FixedTypeParser(c -> new MockMetadataMapper());

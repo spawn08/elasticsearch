@@ -14,6 +14,7 @@ import org.elasticsearch.common.io.stream.NamedWriteableRegistry;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.compute.Describable;
+import org.elasticsearch.compute.aggregation.AggregatorMode;
 import org.elasticsearch.compute.aggregation.GroupingAggregator;
 import org.elasticsearch.compute.aggregation.GroupingAggregatorFunction;
 import org.elasticsearch.compute.aggregation.blockhash.BlockHash;
@@ -23,6 +24,7 @@ import org.elasticsearch.compute.data.IntVector;
 import org.elasticsearch.compute.data.Page;
 import org.elasticsearch.core.Releasables;
 import org.elasticsearch.core.TimeValue;
+import org.elasticsearch.index.analysis.AnalysisRegistry;
 import org.elasticsearch.xcontent.XContentBuilder;
 
 import java.io.IOException;
@@ -39,11 +41,26 @@ public class HashAggregationOperator implements Operator {
 
     public record HashAggregationOperatorFactory(
         List<BlockHash.GroupSpec> groups,
+        AggregatorMode aggregatorMode,
         List<GroupingAggregator.Factory> aggregators,
-        int maxPageSize
+        int maxPageSize,
+        AnalysisRegistry analysisRegistry
     ) implements OperatorFactory {
         @Override
         public Operator get(DriverContext driverContext) {
+            if (groups.stream().anyMatch(BlockHash.GroupSpec::isCategorize)) {
+                return new HashAggregationOperator(
+                    aggregators,
+                    () -> BlockHash.buildCategorizeBlockHash(
+                        groups,
+                        aggregatorMode,
+                        driverContext.blockFactory(),
+                        analysisRegistry,
+                        maxPageSize
+                    ),
+                    driverContext
+                );
+            }
             return new HashAggregationOperator(
                 aggregators,
                 () -> BlockHash.build(groups, driverContext.blockFactory(), maxPageSize, false),
@@ -150,18 +167,23 @@ public class HashAggregationOperator implements Operator {
                     hashStart = System.nanoTime();
                     aggregationNanos += hashStart - aggStart;
                 }
+
+                @Override
+                public void close() {
+                    Releasables.closeExpectNoException(prepared);
+                }
             }
-            AddInput add = new AddInput();
+            try (AddInput add = new AddInput()) {
+                checkState(needsInput(), "Operator is already finishing");
+                requireNonNull(page, "page is null");
 
-            checkState(needsInput(), "Operator is already finishing");
-            requireNonNull(page, "page is null");
+                for (int i = 0; i < prepared.length; i++) {
+                    prepared[i] = aggregators.get(i).prepareProcessPage(blockHash, page);
+                }
 
-            for (int i = 0; i < prepared.length; i++) {
-                prepared[i] = aggregators.get(i).prepareProcessPage(blockHash, page);
+                blockHash.add(wrapPage(page), add);
+                hashNanos += System.nanoTime() - add.hashStart;
             }
-
-            blockHash.add(wrapPage(page), add);
-            hashNanos += System.nanoTime() - add.hashStart;
         } finally {
             page.releaseBlocks();
             pagesProcessed++;

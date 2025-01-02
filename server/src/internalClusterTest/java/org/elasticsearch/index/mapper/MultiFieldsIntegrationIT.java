@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.index.mapper;
@@ -90,11 +91,11 @@ public class MultiFieldsIntegrationIT extends ESIntegTestCase {
         GeoPoint point = new GeoPoint(51, 19);
         prepareIndex("my-index").setId("1").setSource("a", point.toString()).setRefreshPolicy(IMMEDIATE).get();
         assertHitCount(
+            1L,
             prepareSearch("my-index").setSize(0)
                 .setQuery(constantScoreQuery(geoDistanceQuery("a").point(51, 19).distance(50, DistanceUnit.KILOMETERS))),
-            1L
+            prepareSearch("my-index").setSize(0).setQuery(matchQuery("a.b", point.geohash()))
         );
-        assertHitCount(prepareSearch("my-index").setSize(0).setQuery(matchQuery("a.b", point.geohash())), 1L);
     }
 
     @SuppressWarnings("unchecked")

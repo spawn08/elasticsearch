@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 package org.elasticsearch.legacygeo.mapper;
 
@@ -45,6 +46,7 @@ import org.elasticsearch.legacygeo.XShapeCollection;
 import org.elasticsearch.legacygeo.builders.ShapeBuilder;
 import org.elasticsearch.legacygeo.parsers.ShapeParser;
 import org.elasticsearch.legacygeo.query.LegacyGeoShapeQueryProcessor;
+import org.elasticsearch.lucene.spatial.CoordinateEncoder;
 import org.elasticsearch.xcontent.XContentBuilder;
 import org.elasticsearch.xcontent.XContentParser;
 import org.locationtech.spatial4j.shape.Point;
@@ -352,12 +354,12 @@ public class LegacyGeoShapeFieldMapper extends AbstractShapeGeometryFieldMapper<
         public LegacyGeoShapeFieldMapper build(MapperBuilderContext context) {
             LegacyGeoShapeParser parser = new LegacyGeoShapeParser();
             GeoShapeFieldType ft = buildFieldType(parser, context);
-            return new LegacyGeoShapeFieldMapper(leafName(), ft, multiFieldsBuilder.build(this, context), copyTo, parser, this);
+            return new LegacyGeoShapeFieldMapper(leafName(), ft, builderParams(this, context), parser, this);
         }
     }
 
     @Deprecated
-    public static Mapper.TypeParser PARSER = (name, node, parserContext) -> {
+    public static final Mapper.TypeParser PARSER = (name, node, parserContext) -> {
         boolean ignoreMalformedByDefault = IGNORE_MALFORMED_SETTING.get(parserContext.getSettings());
         boolean coerceByDefault = COERCE_SETTING.get(parserContext.getSettings());
         FieldMapper.Builder builder = new LegacyGeoShapeFieldMapper.Builder(
@@ -529,6 +531,17 @@ public class LegacyGeoShapeFieldMapper extends AbstractShapeGeometryFieldMapper<
         protected Function<List<ShapeBuilder<?, ?, ?>>, List<Object>> getFormatter(String format) {
             return GeometryFormatterFactory.getFormatter(format, ShapeBuilder::buildGeometry);
         }
+
+        @Override
+        protected boolean isBoundsExtractionSupported() {
+            // Extracting bounds for geo shapes is not implemented yet.
+            return false;
+        }
+
+        @Override
+        protected CoordinateEncoder coordinateEncoder() {
+            return CoordinateEncoder.GEO;
+        }
     }
 
     private final IndexVersion indexCreatedVersion;
@@ -537,20 +550,18 @@ public class LegacyGeoShapeFieldMapper extends AbstractShapeGeometryFieldMapper<
     public LegacyGeoShapeFieldMapper(
         String simpleName,
         MappedFieldType mappedFieldType,
-        MultiFields multiFields,
-        CopyTo copyTo,
+        BuilderParams builderParams,
         LegacyGeoShapeParser parser,
         Builder builder
     ) {
         super(
             simpleName,
             mappedFieldType,
+            builderParams,
             builder.ignoreMalformed.get(),
             builder.coerce.get(),
             builder.ignoreZValue.get(),
             builder.orientation.get(),
-            multiFields,
-            copyTo,
             parser
         );
         this.indexCreatedVersion = builder.indexCreatedVersion;

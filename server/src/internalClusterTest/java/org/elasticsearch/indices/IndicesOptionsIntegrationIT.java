@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 package org.elasticsearch.indices;
 
@@ -286,7 +287,7 @@ public class IndicesOptionsIntegrationIT extends ESIntegTestCase {
         verify(indicesStats(indices), false);
         verify(forceMerge(indices), false);
         verify(refreshBuilder(indices), false);
-        verify(validateQuery(indices), true);
+        verify(validateQuery(indices), false);
         verify(getAliases(indices), false);
         verify(getFieldMapping(indices), false);
         verify(getMapping(indices), false);
@@ -337,7 +338,7 @@ public class IndicesOptionsIntegrationIT extends ESIntegTestCase {
         verify(indicesStats(indices), false);
         verify(forceMerge(indices), false);
         verify(refreshBuilder(indices), false);
-        verify(validateQuery(indices), true);
+        verify(validateQuery(indices), false);
         verify(getAliases(indices), false);
         verify(getFieldMapping(indices), false);
         verify(getMapping(indices), false);
@@ -397,8 +398,11 @@ public class IndicesOptionsIntegrationIT extends ESIntegTestCase {
     public void testAllMissingLenient() throws Exception {
         createIndex("test1");
         prepareIndex("test1").setId("1").setSource("k", "v").setRefreshPolicy(IMMEDIATE).get();
-        assertHitCount(prepareSearch("test2").setIndicesOptions(IndicesOptions.lenientExpandOpen()).setQuery(matchAllQuery()), 0L);
-        assertHitCount(prepareSearch("test2", "test3").setQuery(matchAllQuery()).setIndicesOptions(IndicesOptions.lenientExpandOpen()), 0L);
+        assertHitCount(
+            0L,
+            prepareSearch("test2").setIndicesOptions(IndicesOptions.lenientExpandOpen()).setQuery(matchAllQuery()),
+            prepareSearch("test2", "test3").setQuery(matchAllQuery()).setIndicesOptions(IndicesOptions.lenientExpandOpen())
+        );
         // you should still be able to run empty searches without things blowing up
         assertHitCount(prepareSearch().setIndicesOptions(IndicesOptions.lenientExpandOpen()).setQuery(matchAllQuery()), 1L);
     }
@@ -642,7 +646,7 @@ public class IndicesOptionsIntegrationIT extends ESIntegTestCase {
     }
 
     static GetAliasesRequestBuilder getAliases(String... indices) {
-        return indicesAdmin().prepareGetAliases("dummy").addIndices(indices);
+        return indicesAdmin().prepareGetAliases("dummy").setIndices(indices);
     }
 
     static GetFieldMappingsRequestBuilder getFieldMapping(String... indices) {

@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.cluster.serialization;
@@ -69,7 +70,7 @@ public class ClusterSerializationTests extends ESAllocationTestCase {
             .settings(settings(IndexVersion.current()))
             .numberOfShards(10)
             .numberOfReplicas(1)
-            .eventIngestedRange(eventIngestedRangeInput, TransportVersions.EVENT_INGESTED_RANGE_IN_CLUSTER_STATE);
+            .eventIngestedRange(eventIngestedRangeInput, TransportVersions.V_8_15_0);
 
         ClusterStateTestRecord result = createAndSerializeClusterState(indexMetadataBuilder, TransportVersion.current());
 
@@ -87,9 +88,8 @@ public class ClusterSerializationTests extends ESAllocationTestCase {
 
     public void testClusterStateSerializationWithTimestampRangesWithOlderTransportVersion() throws Exception {
         TransportVersion versionBeforeEventIngestedInClusterState = randomFrom(
-            TransportVersions.V_7_0_0,
             TransportVersions.V_8_0_0,
-            TransportVersions.ML_INFERENCE_GOOGLE_VERTEX_AI_EMBEDDINGS_ADDED  // version before EVENT_INGESTED_RANGE_IN_CLUSTER_STATE
+            TransportVersionUtils.getPreviousVersion(TransportVersions.V_8_15_0)
         );
         {
             IndexLongFieldRange eventIngestedRangeInput = randomFrom(

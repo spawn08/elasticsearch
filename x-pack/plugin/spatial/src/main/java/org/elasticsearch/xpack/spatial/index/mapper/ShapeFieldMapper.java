@@ -122,11 +122,11 @@ public class ShapeFieldMapper extends AbstractShapeGeometryFieldMapper<Geometry>
                 parser,
                 meta.get()
             );
-            return new ShapeFieldMapper(leafName(), ft, multiFieldsBuilder.build(this, context), copyTo, parser, this);
+            return new ShapeFieldMapper(leafName(), ft, builderParams(this, context), parser, this);
         }
     }
 
-    public static TypeParser PARSER = new TypeParser(
+    public static final TypeParser PARSER = new TypeParser(
         (n, c) -> new Builder(
             n,
             c.indexVersionCreated(),
@@ -184,6 +184,16 @@ public class ShapeFieldMapper extends AbstractShapeGeometryFieldMapper<Geometry>
         protected Function<List<Geometry>, List<Object>> getFormatter(String format) {
             return GeometryFormatterFactory.getFormatter(format, Function.identity());
         }
+
+        @Override
+        protected boolean isBoundsExtractionSupported() {
+            return true;
+        }
+
+        @Override
+        protected CoordinateEncoder coordinateEncoder() {
+            return CoordinateEncoder.CARTESIAN;
+        }
     }
 
     private final Builder builder;
@@ -192,20 +202,18 @@ public class ShapeFieldMapper extends AbstractShapeGeometryFieldMapper<Geometry>
     public ShapeFieldMapper(
         String simpleName,
         MappedFieldType mappedFieldType,
-        MultiFields multiFields,
-        CopyTo copyTo,
+        BuilderParams builderParams,
         Parser<Geometry> parser,
         Builder builder
     ) {
         super(
             simpleName,
             mappedFieldType,
+            builderParams,
             builder.ignoreMalformed.get(),
             builder.coerce.get(),
             builder.ignoreZValue.get(),
             builder.orientation.get(),
-            multiFields,
-            copyTo,
             parser
         );
         this.builder = builder;

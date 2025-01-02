@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.test.cluster.local;
@@ -175,8 +176,9 @@ public class DefaultLocalClusterHandle implements LocalClusterHandle {
         return nodes.get(index).getPid();
     }
 
+    @Override
     public void stopNode(int index, boolean forcibly) {
-        nodes.get(index).stop(false);
+        nodes.get(index).stop(forcibly);
     }
 
     @Override
@@ -251,9 +253,8 @@ public class DefaultLocalClusterHandle implements LocalClusterHandle {
         execute(() -> nodes.parallelStream().forEach(node -> {
             try {
                 Path hostsFile = node.getWorkingDir().resolve("config").resolve("unicast_hosts.txt");
-                if (Files.notExists(hostsFile)) {
-                    Files.writeString(hostsFile, transportUris);
-                }
+                LOGGER.info("Writing unicast hosts file {} for node {}", hostsFile, node.getName());
+                Files.writeString(hostsFile, transportUris);
             } catch (IOException e) {
                 throw new UncheckedIOException("Failed to write unicast_hosts for: " + node, e);
             }
