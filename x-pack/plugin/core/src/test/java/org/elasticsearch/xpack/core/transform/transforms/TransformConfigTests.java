@@ -7,7 +7,6 @@
 
 package org.elasticsearch.xpack.core.transform.transforms;
 
-import org.elasticsearch.TransportVersions;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.bytes.BytesReference;
 import org.elasticsearch.common.io.stream.BytesStreamOutput;
@@ -23,12 +22,8 @@ import org.elasticsearch.xcontent.XContentFactory;
 import org.elasticsearch.xcontent.XContentParser;
 import org.elasticsearch.xcontent.XContentParserConfiguration;
 import org.elasticsearch.xcontent.XContentType;
-import org.elasticsearch.xpack.core.common.validation.SourceDestValidator.RemoteClusterMinimumVersionValidation;
-import org.elasticsearch.xpack.core.common.validation.SourceDestValidator.SourceDestValidation;
 import org.elasticsearch.xpack.core.deprecation.DeprecationIssue;
 import org.elasticsearch.xpack.core.deprecation.DeprecationIssue.Level;
-import org.elasticsearch.xpack.core.security.authc.AuthenticationTestHelper;
-import org.elasticsearch.xpack.core.security.user.User;
 import org.elasticsearch.xpack.core.transform.AbstractSerializingTransformTestCase;
 import org.elasticsearch.xpack.core.transform.TransformConfigVersion;
 import org.elasticsearch.xpack.core.transform.TransformDeprecations;
@@ -46,23 +41,18 @@ import java.util.List;
 import java.util.Map;
 
 import static org.elasticsearch.test.TestMatchers.matchesPattern;
-import static org.elasticsearch.xpack.core.security.authc.AuthenticationField.AUTHENTICATION_KEY;
 import static org.elasticsearch.xpack.core.transform.transforms.DestConfigTests.randomDestConfig;
 import static org.elasticsearch.xpack.core.transform.transforms.SourceConfigTests.randomInvalidSourceConfig;
 import static org.elasticsearch.xpack.core.transform.transforms.SourceConfigTests.randomSourceConfig;
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.empty;
 import static org.hamcrest.Matchers.equalTo;
-import static org.hamcrest.Matchers.hasSize;
-import static org.hamcrest.Matchers.instanceOf;
 import static org.hamcrest.Matchers.is;
 
 public class TransformConfigTests extends AbstractSerializingTransformTestCase<TransformConfig> {
 
     private String transformId;
     private boolean runWithHeaders;
-    private static final String DATA_FRAME_TRANSFORMS_ADMIN_ROLE = "data_frame_transforms_admin";
-    private static final String DATA_FRAME_TRANSFORMS_USER_ROLE = "data_frame_transforms_user";
 
     public static TransformConfig randomTransformConfigWithoutHeaders() {
         return randomTransformConfigWithoutHeaders(randomAlphaOfLengthBetween(1, 10));
@@ -83,10 +73,19 @@ public class TransformConfigTests extends AbstractSerializingTransformTestCase<T
     }
 
     public static TransformConfig randomTransformConfigWithoutHeaders(String id, PivotConfig pivotConfig, LatestConfig latestConfig) {
+        return randomTransformConfigWithoutHeaders(id, pivotConfig, latestConfig, randomDestConfig());
+    }
+
+    public static TransformConfig randomTransformConfigWithoutHeaders(
+        String id,
+        PivotConfig pivotConfig,
+        LatestConfig latestConfig,
+        DestConfig destConfig
+    ) {
         return new TransformConfig(
             id,
             randomSourceConfig(),
-            randomDestConfig(),
+            destConfig,
             randomBoolean() ? null : TimeValue.timeValueMillis(randomIntBetween(1_000, 3_600_000)),
             randomBoolean() ? null : randomSyncConfig(),
             null,
@@ -152,6 +151,14 @@ public class TransformConfigTests extends AbstractSerializingTransformTestCase<T
             latestConfig = LatestConfigTests.randomLatestConfig();
         }
 
+        return randomTransformConfigWithSettings(settingsConfig, pivotConfig, latestConfig);
+    }
+
+    public static TransformConfig randomTransformConfigWithSettings(
+        SettingsConfig settingsConfig,
+        PivotConfig pivotConfig,
+        LatestConfig latestConfig
+    ) {
         return new TransformConfig(
             randomAlphaOfLengthBetween(1, 10),
             randomSourceConfig(),
@@ -841,47 +848,6 @@ public class TransformConfigTests extends AbstractSerializingTransformTestCase<T
         assertThat(transformConfig.getAdditionalSourceDestValidations(), is(empty()));
     }
 
-    public void testGetAdditionalSourceDestValidations_WithRuntimeMappings() throws IOException {
-        String json = """
-            {
-              "id": "body_id",
-              "source": {
-                "index": "src",
-                "runtime_mappings": {
-                  "some-field": "some-value"
-                }
-              },
-              "dest": {
-                "index": "dest"
-              },
-              "pivot": {
-                "group_by": {
-                  "id": {
-                    "terms": {
-                      "field": "id"
-                    }
-                  }
-                },
-                "aggs": {
-                  "avg": {
-                    "avg": {
-                      "field": "points"
-                    }
-                  }
-                }
-              }
-            }""";
-
-        TransformConfig transformConfig = createTransformConfigFromString(json, "body_id", true);
-        List<SourceDestValidation> additiionalValidations = transformConfig.getAdditionalSourceDestValidations();
-        assertThat(additiionalValidations, hasSize(1));
-        assertThat(additiionalValidations.get(0), is(instanceOf(RemoteClusterMinimumVersionValidation.class)));
-        RemoteClusterMinimumVersionValidation remoteClusterMinimumVersionValidation =
-            (RemoteClusterMinimumVersionValidation) additiionalValidations.get(0);
-        assertThat(remoteClusterMinimumVersionValidation.getMinExpectedTransportVersion(), is(equalTo(TransportVersions.V_7_12_0)));
-        assertThat(remoteClusterMinimumVersionValidation.getReason(), is(equalTo("source.runtime_mappings field was set")));
-    }
-
     public void testGroupByStayInOrder() throws IOException {
         String json = Strings.format("""
             {
@@ -1019,44 +985,6 @@ public class TransformConfigTests extends AbstractSerializingTransformTestCase<T
                         "Transform [" + id + "] uses the deprecated setting [max_page_search_size]",
                         TransformDeprecations.MAX_PAGE_SEARCH_SIZE_BREAKING_CHANGES_URL,
                         TransformDeprecations.ACTION_MAX_PAGE_SEARCH_SIZE_IS_DEPRECATED,
-                        false,
-                        null
-                    )
-                )
-            )
-        );
-    }
-
-    public void testCheckForDeprecations_WithDeprecatedTransformUserAdmin() throws IOException {
-        testCheckForDeprecations_WithDeprecatedRoles(List.of(DATA_FRAME_TRANSFORMS_ADMIN_ROLE));
-    }
-
-    public void testCheckForDeprecations_WithDeprecatedTransformUserRole() throws IOException {
-        testCheckForDeprecations_WithDeprecatedRoles(List.of(DATA_FRAME_TRANSFORMS_USER_ROLE));
-    }
-
-    public void testCheckForDeprecations_WithDeprecatedTransformRoles() throws IOException {
-        testCheckForDeprecations_WithDeprecatedRoles(List.of(DATA_FRAME_TRANSFORMS_ADMIN_ROLE, DATA_FRAME_TRANSFORMS_USER_ROLE));
-    }
-
-    private void testCheckForDeprecations_WithDeprecatedRoles(List<String> roles) throws IOException {
-        var authentication = AuthenticationTestHelper.builder()
-            .realm()
-            .user(new User(randomAlphaOfLength(10), roles.toArray(String[]::new)))
-            .build();
-        Map<String, String> headers = Map.of(AUTHENTICATION_KEY, authentication.encode());
-        TransformConfig deprecatedConfig = randomTransformConfigWithHeaders(headers);
-
-        // important: checkForDeprecations does _not_ create new deprecation warnings
-        assertThat(
-            deprecatedConfig.checkForDeprecations(xContentRegistry()),
-            equalTo(
-                List.of(
-                    new DeprecationIssue(
-                        Level.CRITICAL,
-                        "Transform [" + deprecatedConfig.getId() + "] uses deprecated transform roles " + roles,
-                        TransformDeprecations.DATA_FRAME_TRANSFORMS_ROLES_BREAKING_CHANGES_URL,
-                        TransformDeprecations.DATA_FRAME_TRANSFORMS_ROLES_IS_DEPRECATED,
                         false,
                         null
                     )

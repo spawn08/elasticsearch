@@ -14,7 +14,7 @@ import org.apache.logging.log4j.Logger;
 import org.elasticsearch.client.Request;
 import org.elasticsearch.client.Response;
 import org.elasticsearch.client.ResponseException;
-import org.elasticsearch.cluster.metadata.DataStream;
+import org.elasticsearch.client.WarningFailureException;
 import org.elasticsearch.cluster.metadata.IndexMetadata;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.settings.Settings;
@@ -190,7 +190,11 @@ public class TimeSeriesLifecycleActionsIT extends ESRestTestCase {
     }
 
     public void testFreezeNoop() throws Exception {
-        createNewSingletonPolicy(client(), policy, "cold", FreezeAction.INSTANCE);
+        try {
+            createNewSingletonPolicy(client(), policy, "cold", FreezeAction.INSTANCE);
+        } catch (WarningFailureException e) {
+            assertThat(e.getMessage(), containsString("The freeze action in ILM is deprecated and will be removed in a future version"));
+        }
 
         createIndexWithSettings(
             client(),
@@ -202,11 +206,16 @@ public class TimeSeriesLifecycleActionsIT extends ESRestTestCase {
                 .put("index.lifecycle.name", policy)
         );
 
-        assertBusy(
-            () -> assertThat(getStepKeyForIndex(client(), index), equalTo(PhaseCompleteStep.finalStep("cold").getKey())),
-            30,
-            TimeUnit.SECONDS
-        );
+        assertBusy(() -> {
+            try {
+                assertThat(getStepKeyForIndex(client(), index), equalTo(PhaseCompleteStep.finalStep("cold").getKey()));
+            } catch (WarningFailureException e) {
+                assertThat(
+                    e.getMessage(),
+                    containsString("The freeze action in ILM is deprecated and will be removed in a future version")
+                );
+            }
+        }, 30, TimeUnit.SECONDS);
         assertFalse(getOnlyIndexSettings(client(), index).containsKey("index.frozen"));
     }
 
@@ -1221,7 +1230,7 @@ public class TimeSeriesLifecycleActionsIT extends ESRestTestCase {
         }
 
         // Finally, check that the history index is in a good state
-        String historyIndexName = DataStream.getDefaultBackingIndexName("ilm-history-7", 1);
+        String historyIndexName = getDataStreamBackingIndexNames("ilm-history-7").getFirst();
         Response explainHistoryIndex = client().performRequest(new Request("GET", historyIndexName + "/_lifecycle/explain"));
         Map<String, Object> responseMap;
         try (InputStream is = explainHistoryIndex.getEntity().getContent()) {

@@ -2632,6 +2632,41 @@ public class HighlighterSearchIT extends ESIntegTestCase {
         });
     }
 
+    public void testMaxQueryOffsetDefault() throws Exception {
+        assertAcked(
+            prepareCreate("test").setMapping(type1PostingsffsetsMapping())
+                .setSettings(Settings.builder().put("index.highlight.max_analyzed_offset", "10").build())
+        );
+        ensureGreen();
+
+        prepareIndex("test").setSource(
+            "field1",
+            new String[] {
+                "This sentence contains one match, not that short. This sentence contains zero sentence matches. "
+                    + "This one contains no matches.",
+                "This is the second value's first sentence. This one contains no matches. "
+                    + "This sentence contains three sentence occurrences (sentence).",
+                "One sentence match here and scored lower since the text is quite long, not that appealing. "
+                    + "This one contains no matches." }
+        ).get();
+        refresh();
+
+        // Specific for this test: by passing "-1" as "maxAnalyzedOffset", the index highlight setting above will be used.
+        SearchSourceBuilder source = searchSource().query(termQuery("field1", "sentence"))
+            .highlighter(highlight().field("field1").order("score").maxAnalyzedOffset(-1));
+
+        assertResponse(client().search(new SearchRequest("test").source(source)), response -> {
+            Map<String, HighlightField> highlightFieldMap = response.getHits().getAt(0).getHighlightFields();
+            assertThat(highlightFieldMap.size(), equalTo(1));
+            HighlightField field1 = highlightFieldMap.get("field1");
+            assertThat(field1.fragments().length, equalTo(1));
+            assertThat(
+                field1.fragments()[0].string(),
+                equalTo("This <em>sentence</em> contains one match, not that short. This sentence contains zero sentence matches.")
+            );
+        });
+    }
+
     public void testPostingsHighlighterEscapeHtml() throws Exception {
         assertAcked(prepareCreate("test").setMapping("title", "type=text," + randomStoreField() + "index_options=offsets"));
 
@@ -3149,7 +3184,10 @@ public class HighlighterSearchIT extends ESIntegTestCase {
             .endObject()
             .endObject();
         assertAcked(prepareCreate("test").setMapping(mapping));
-        assertAcked(indicesAdmin().prepareAliases().addAlias("test", "filtered_alias", matchQuery("foo", "japanese")));
+        assertAcked(
+            indicesAdmin().prepareAliases(TEST_REQUEST_TIMEOUT, TEST_REQUEST_TIMEOUT)
+                .addAlias("test", "filtered_alias", matchQuery("foo", "japanese"))
+        );
         ensureGreen();
 
         indexRandom(true, prepareIndex("test").setSource("foo", "test japanese"));

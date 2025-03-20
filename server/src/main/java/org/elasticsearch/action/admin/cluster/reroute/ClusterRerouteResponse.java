@@ -50,7 +50,6 @@ public class ClusterRerouteResponse extends ActionResponse implements IsAcknowle
     private final boolean acknowledged;
 
     ClusterRerouteResponse(StreamInput in) throws IOException {
-        super(in);
         acknowledged = in.readBoolean();
         state = ClusterState.readFrom(in, null);
         explanations = RoutingExplanations.readFrom(in);
@@ -97,7 +96,7 @@ public class ClusterRerouteResponse extends ActionResponse implements IsAcknowle
         return Iterators.concat(
             Iterators.single((builder, params) -> builder.startObject().field(ACKNOWLEDGED_KEY, isAcknowledged())),
             emitState(outerParams)
-                ? ChunkedToXContentHelper.wrapWithObject("state", state.toXContentChunked(outerParams))
+                ? ChunkedToXContentHelper.object("state", state.toXContentChunked(outerParams))
                 : Collections.emptyIterator(),
             Iterators.single((builder, params) -> {
                 if (params.paramAsBoolean("explain", false)) {

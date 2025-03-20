@@ -45,7 +45,7 @@ if (useDra == false) {
         ivy {
           name = 'beats'
           if (useLocalArtifacts) {
-            url getLayout().getBuildDirectory().dir("artifacts").get().asFile
+            url = getLayout().getBuildDirectory().dir("artifacts").get().asFile
             patternLayout {
               artifact '/[organisation]/[module]-[revision]-[classifier].[ext]'
             }
@@ -119,7 +119,7 @@ ext.expansions = { Architecture architecture, DockerBase base ->
   // the image. When developing the Docker images, it's very tedious to completely rebuild
   // an image for every single change. Therefore, outside of CI, we fix the
   // build time to midnight so that the Docker build cache is usable.
-  def buildDate = buildParams.isCi() ? buildParams.buildDate : buildParams.buildDate.truncatedTo(ChronoUnit.DAYS).toString()
+  def buildDate = buildParams.ci ? buildParams.buildDate : buildParams.buildDate.truncatedTo(ChronoUnit.DAYS).toString()
 
   return [
     'arch'               : architecture.classifier,
@@ -127,7 +127,7 @@ ext.expansions = { Architecture architecture, DockerBase base ->
     'bin_dir'            : base == DockerBase.IRON_BANK ? 'scripts' : 'bin',
     'build_date'         : buildDate,
     'config_dir'         : base == DockerBase.IRON_BANK ? 'scripts' : 'config',
-    'git_revision'       : buildParams.gitRevision,
+    'git_revision'       : buildParams.gitRevision.get(),
     'license'            : base == DockerBase.IRON_BANK ? 'Elastic License 2.0' : 'Elastic-License-2.0',
     'package_manager'    : base.packageManager,
     'docker_base'        : base.name().toLowerCase(),
@@ -389,7 +389,7 @@ void addBuildDockerImageTask(Architecture architecture, DockerBase base) {
 
       dockerContext.fileProvider(transformTask.map { Sync task -> task.getDestinationDir() })
 
-      noCache = buildParams.isCi()
+      noCache = buildParams.ci
       tags = generateTags(base, architecture)
       platforms.add(architecture.dockerPlatform)
 
@@ -484,7 +484,7 @@ void addBuildEssDockerImageTask(Architecture architecture) {
 
       dockerContext.fileProvider(buildContextTask.map { it.getDestinationDir() })
 
-      noCache = buildParams.isCi()
+      noCache = buildParams.ci
       baseImages = []
       tags = generateTags(dockerBase, architecture)
       platforms.add(architecture.dockerPlatform)
@@ -551,6 +551,7 @@ subprojects { Project subProject ->
       inputs.file("${parent.projectDir}/build/markers/${buildTaskName}.marker")
       executable = 'docker'
       outputs.file(tarFile)
+      outputs.doNotCacheIf("Build cache is disabled for export tasks") { true }
       args "save",
         "-o",
         tarFile,

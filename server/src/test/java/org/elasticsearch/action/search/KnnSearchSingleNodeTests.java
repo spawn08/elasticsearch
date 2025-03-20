@@ -367,7 +367,9 @@ public class KnnSearchSingleNodeTests extends ESSingleNodeTestCase {
             .endObject()
             .endObject();
         createIndex("index", indexSettings, builder);
-        indicesAdmin().prepareAliases().addAlias("index", "test-alias", QueryBuilders.termQuery("field", "hit")).get();
+        indicesAdmin().prepareAliases(TEST_REQUEST_TIMEOUT, TEST_REQUEST_TIMEOUT)
+            .addAlias("index", "test-alias", QueryBuilders.termQuery("field", "hit"))
+            .get();
 
         int expectedHits = 0;
         for (int doc = 0; doc < 10; doc++) {
@@ -418,7 +420,7 @@ public class KnnSearchSingleNodeTests extends ESSingleNodeTestCase {
         float[] queryVector = randomVector();
         assertResponse(
             client().prepareSearch("index1", "index2")
-                .setQuery(new KnnVectorQueryBuilder("vector", queryVector, null, 5, null, null))
+                .setQuery(new KnnVectorQueryBuilder("vector", queryVector, 5, 5, null, null))
                 .setSize(2),
             response -> {
                 // The total hits is num_cands * num_shards, since the query gathers num_cands hits from each shard
